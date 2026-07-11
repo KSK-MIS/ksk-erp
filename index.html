@@ -1,0 +1,190 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Portal & Phase 0 Admin (index.html)
+     Deploys on: GitHub Pages (upload this whole file, never edit)
+     Backend: Supabase project ksk-erp (Mumbai)
+     The anon key below is PUBLIC BY DESIGN — every row is guarded
+     by Row-Level Security inside the database, not by this file.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KSK ERP 1.0</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { background:var(--bg); min-height:100vh; }
+  header { background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
+  header .logo { background:var(--gold); color:var(--navy); font-weight:800; border-radius:8px; padding:4px 8px; }
+  header h1 { font-size:17px; font-weight:600; flex:1; }
+  header small { display:block; font-weight:400; opacity:.75; font-size:11px; }
+  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:999px; padding:4px 10px; font-size:12px; }
+  main { max-width:520px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:14px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:18px; margin-bottom:14px; }
+  h2 { font-size:15px; color:var(--navy); margin-bottom:10px; }
+  label { display:block; font-size:12px; color:#555; margin:10px 0 4px; }
+  input, select { width:100%; padding:12px; border:1px solid #cfd6e0; border-radius:10px; font-size:15px; background:#fff; }
+  button { width:100%; padding:13px; margin-top:14px; border:0; border-radius:10px; background:var(--navy); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+  button.gold { background:var(--gold); color:var(--navy); }
+  button.ghost { background:#e8ecf2; color:var(--navy); }
+  .muted { color:#667; font-size:12.5px; line-height:1.5; }
+  .msg { margin-top:12px; padding:10px 12px; border-radius:8px; font-size:13.5px; display:none; }
+  .msg.ok  { display:block; background:#e6f4ea; color:var(--ok); }
+  .msg.err { display:block; background:#fdeaea; color:var(--bad); }
+  .user-row { display:flex; align-items:center; gap:10px; padding:12px 2px; border-bottom:1px solid #eef1f5; }
+  .user-row:last-child { border-bottom:0; }
+  .avatar { width:38px; height:38px; border-radius:50%; background:var(--navy2); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
+  .user-info { flex:1; min-width:0; }
+  .user-info b { display:block; font-size:14px; color:#182b45; }
+  .user-info span { font-size:12px; color:#778; word-break:break-all; }
+  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; }
+  .tag.DIRECTOR { background:#fff3d6; color:#8a6d00; }
+  .tag.ADMIN { background:#e2ecff; color:#1c4fa0; }
+  .tag.STAFF { background:#e8f0ea; color:#2e6b3e; }
+  .tag.off { background:#f1d5d8; color:var(--bad); }
+  .tiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .tile { background:#fff; border-radius:14px; padding:16px 14px; box-shadow:0 1px 4px rgba(15,36,64,.08); }
+  .tile b { color:var(--navy); font-size:14px; display:block; margin-bottom:4px; }
+  .tile span { font-size:11.5px; color:#889; }
+  .tile.soon { opacity:.55; }
+  #screen-app, #screen-login, #screen-denied { display:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">KSK</div>
+  <h1>KSK ERP 1.0 <small>My ERP. My Control.</small></h1>
+  <div class="chip" id="who" style="display:none"></div>
+</header>
+
+<main>
+
+  <!-- ============ LOGIN ============ -->
+  <section id="screen-login">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="muted">Enter your company email. You'll receive a sign-in link — open it on this device.</p>
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@kskenggind.com" autocomplete="email">
+      <button id="btn-login">Send sign-in link</button>
+      <div class="msg" id="login-msg"></div>
+    </div>
+  </section>
+
+  <!-- ============ NOT PROVISIONED ============ -->
+  <section id="screen-denied">
+    <div class="card">
+      <h2>Private system</h2>
+      <p class="muted">You are signed in, but this account has not been given access to KSK ERP. Please contact the Director.</p>
+      <button class="ghost" onclick="signOut()">Sign out</button>
+    </div>
+  </section>
+
+  <!-- ============ PORTAL ============ -->
+  <section id="screen-app">
+
+    <div class="tiles" style="margin-bottom:14px">
+      <div class="tile soon"><b>My Tasks</b><span>Coming — Module 1</span></div>
+      <div class="tile soon"><b>Delegation</b><span>Coming — Module 1</span></div>
+      <div class="tile soon"><b>Capture</b><span>Coming — Module 1</span></div>
+      <div class="tile soon"><b>Checklists</b><span>Coming — Module 1</span></div>
+    </div>
+
+    <div class="card" id="admin-card" style="display:none">
+      <h2>Users &amp; Access</h2>
+      <div id="user-list" class="muted">Loading…</div>
+      <hr style="border:0;border-top:1px solid #eef1f5;margin:14px 0">
+      <h2>Add / update a user</h2>
+      <label>Email</label>
+      <input id="u-email" type="email" placeholder="name@kskenggind.com">
+      <label>Full name</label>
+      <input id="u-name" type="text" placeholder="Full name">
+      <label>Role</label>
+      <select id="u-role">
+        <option value="STAFF">Staff — own tasks, own capture, own score</option>
+        <option value="ADMIN">Admin — sees all tasks, manages day-to-day</option>
+        <option value="DIRECTOR">Director — full control</option>
+      </select>
+      <label>Status</label>
+      <select id="u-active">
+        <option value="true">Active</option>
+        <option value="false">Deactivated (never deleted — Law 3)</option>
+      </select>
+      <button class="gold" id="btn-save">Save user</button>
+      <div class="msg" id="admin-msg"></div>
+    </div>
+
+    <div class="card">
+      <button class="ghost" onclick="signOut()">Sign out</button>
+    </div>
+  </section>
+
+</main>
+
+<script>
+const SUPABASE_URL = "https://xpacvqbmpvcwhcimieaq.supabase.co";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c";
+// ^ public by design — RLS inside Postgres is the guard, not this file.
+
+const sb = supabase.createClient(SUPABASE_URL, ANON_KEY);
+const $ = id => document.getElementById(id);
+let ME = null;
+
+function show(id){ ['screen-login','screen-denied','screen-app'].forEach(s => $(s).style.display = s===id ? 'block':'none'); }
+function msg(id, text, cls){ const m=$(id); m.textContent=text; m.className='msg '+cls; }
+
+$('btn-login').onclick = async () => {
+  const email = $('email').value.trim().toLowerCase();
+  if(!email){ msg('login-msg','Please enter your email.','err'); return; }
+  const { error } = await sb.auth.signInWithOtp({ email,
+    options: { emailRedirectTo: location.origin + location.pathname } });
+  if(error) msg('login-msg', error.message, 'err');
+  else msg('login-msg','Link sent. Check your inbox (and spam) — open the link on this device.','ok');
+};
+
+async function signOut(){ await sb.auth.signOut(); location.reload(); }
+
+async function route(session){
+  if(!session){ show('screen-login'); return; }
+  const { data, error } = await sb.rpc('my_profile');
+  if(error || !data || !data.length){ show('screen-denied'); return; }
+  ME = data[0];
+  $('who').style.display='block';
+  $('who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  show('screen-app');
+  if(ME.role === 'DIRECTOR' || ME.role === 'ADMIN'){
+    $('admin-card').style.display='block';
+    loadUsers();
+  }
+}
+
+async function loadUsers(){
+  const { data, error } = await sb.rpc('users_list');
+  if(error){ $('user-list').textContent = error.message; return; }
+  $('user-list').innerHTML = data.map(u => `
+    <div class="user-row">
+      <div class="avatar">${u.full_name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase()}</div>
+      <div class="user-info"><b>${u.full_name}${u.is_super_admin?' 🔒':''}</b><span>${u.email}</span></div>
+      <span class="tag ${u.is_active ? u.role : 'off'}">${u.is_active ? u.role : 'INACTIVE'}</span>
+    </div>`).join('');
+}
+
+$('btn-save').onclick = async () => {
+  if(!ME || ME.role!=='DIRECTOR'){ msg('admin-msg','Only a Director can save users.','err'); return; }
+  const p = { p_email:$('u-email').value, p_full_name:$('u-name').value,
+              p_role:$('u-role').value, p_is_active:$('u-active').value==='true' };
+  if(!p.p_email || !p.p_full_name){ msg('admin-msg','Email and name are required.','err'); return; }
+  const { error } = await sb.rpc('user_save', p);
+  if(error){ msg('admin-msg', error.message, 'err'); return; }
+  msg('admin-msg','Saved.','ok'); $('u-email').value=''; $('u-name').value='';
+  loadUsers();
+};
+
+sb.auth.getSession().then(({data}) => route(data.session));
+sb.auth.onAuthStateChange((_e, session) => route(session));
+</script>
+</body>
+</html>
