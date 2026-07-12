@@ -67,9 +67,11 @@
     <div class="card">
       <h2>Sign in</h2>
       <p class="muted">Enter your company email. You'll receive a sign-in link — open it on this device.</p>
-      <label>Email</label>
+      <button class="gold" id="btn-google" style="margin-top:4px">Sign in with Google</button>
+      <p class="muted" style="margin-top:14px">Use your <b>@kskenggind.com</b> Google account. If Google sign-in is unavailable, use the email link below.</p>
+      <label>Email (fallback)</label>
       <input id="email" type="email" placeholder="you@kskenggind.com" autocomplete="email">
-      <button id="btn-login">Send sign-in link</button>
+      <button class="ghost" id="btn-login">Send sign-in link</button>
       <div class="msg" id="login-msg"></div>
     </div>
   </section>
@@ -136,13 +138,19 @@ let ME = null;
 function show(id){ ['screen-login','screen-denied','screen-app'].forEach(s => $(s).style.display = s===id ? 'block':'none'); }
 function msg(id, text, cls){ const m=$(id); m.textContent=text; m.className='msg '+cls; }
 
+$('btn-google').onclick = async () => {
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google',
+    options: { redirectTo: location.origin + location.pathname } });
+  if(error) msg('login-msg', error.message, 'err');
+};
+
 $('btn-login').onclick = async () => {
   const email = $('email').value.trim().toLowerCase();
   if(!email){ msg('login-msg','Please enter your email.','err'); return; }
   const { error } = await sb.auth.signInWithOtp({ email,
     options: { emailRedirectTo: location.origin + location.pathname } });
   if(error) msg('login-msg', error.message, 'err');
-  else msg('login-msg','Link sent. Check your inbox (and spam) — open the link on this device.','ok');
+  else msg('login-msg','Link sent. Open it promptly on this device, in this browser.','ok');
 };
 
 async function signOut(){ await sb.auth.signOut(); location.reload(); }
