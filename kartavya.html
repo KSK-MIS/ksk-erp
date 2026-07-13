@@ -65,6 +65,7 @@ const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 const $ = s => document.querySelector(s);
 let ME = null, USERS = [], TAB = 'my';
+const FREQ = {D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly',H:'Half-yearly',Y:'Yearly'};
 const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
 const today = () => new Date().toISOString().slice(0,10);
@@ -101,7 +102,7 @@ function markCard(m, mine){
   const late = ['overdue'].includes(m.status), pend = ['pending','overdue'].includes(m.status);
   return `<div class="card row">
     <div class="grow"><div class="t-title">${esc(m.title)}</div>
-      <div class="t-sub">${mine?'':esc(m.assignee_name)+' · '}${{D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly'}[m.frequency]} · due ${fmt(m.due_date)} · ${m.on_miss}</div></div>
+      <div class="t-sub">${mine?'':esc(m.assignee_name)+' · '}${FREQ[m.frequency]||m.frequency} · due ${fmt(m.due_date)} · ${m.on_miss}</div></div>
     ${late?`<span class="tag late">OVERDUE ×${m.overdue_count}</span>`:''}
     ${m.status==='missed'?'<span class="tag late">MISSED</span>':''}
     ${['done','done_late'].includes(m.status)?`<span class="tag ok">${m.status.toUpperCase()}</span>`:''}
@@ -151,12 +152,22 @@ const render = {
     if(admin) form = `<div class="card"><div class="t-title">New recurring duty</div>
       <input id="ck-title" placeholder="Duty (e.g. Daily production report)">
       <div class="row"><div class="grow"><label>Assignee</label><select id="ck-who">${USERS.map(u=>`<option value="${u.email}">${esc(u.full_name)}</option>`).join('')}</select></div>
-      <div class="grow"><label>Frequency</label><select id="ck-freq"><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option><option value="Q">Quarterly</option></select></div></div>
+      <div class="grow"><label>Frequency</label><select id="ck-freq">${Object.entries(FREQ).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div></div>
       <label>If missed: <b>lapse</b> = record &amp; move on · <b>carry</b> = stays owed</label>
       <select id="ck-miss"><option value="lapse">lapse</option><option value="carry">carry</option></select>
       <button class="a dark" style="width:100%;margin-top:10px" onclick="ckCreate()">Create</button></div>`;
-    $('#main').innerHTML = form + `<h2>Occurrences</h2>` +
-      (ms.map(m=>markCard(m, m.assignee_email===ME.email)).join('')||'<p class="muted">No checklists yet.</p>');
+    const cs = await q('v_checklists', x=>x.eq('active',true).order('assignee_name').order('frequency'));
+    const mine = cs.filter(c=>c.assignee_email===ME.email);
+    const roster = admin ? cs : mine;
+    $('#main').innerHTML = form +
+      `<h2>${admin?'All duties':'My duties'} (${roster.length})</h2>` +
+      (roster.map(c=>`<div class="card row">
+        <div class="grow"><div class="t-title">${esc(c.title)}</div>
+          <div class="t-sub">${admin?esc(c.assignee_name)+' · ':''}${FREQ[c.frequency]||c.frequency} · ${c.on_miss} · next ${fmt(c.next_due)}</div></div>
+        ${admin?`<button class="a" onclick="ckRetire('${c.id}')">Retire</button>`:''}</div>`).join('')
+        || '<p class="muted">No duties yet.</p>') +
+      `<h2>Occurrences</h2>` +
+      (ms.map(m=>markCard(m, m.assignee_email===ME.email)).join('')||'<p class="muted">Nothing yet.</p>');
   },
   async desk(){
     const [ts, ms] = await Promise.all([
@@ -201,6 +212,8 @@ async function ckCreate(){ const t=$('#ck-title').value; if(!t.trim())return toa
   await rpc('checklist_create',{p_title:t,p_assignee_email:$('#ck-who').value,p_freq:$('#ck-freq').value,p_on_miss:$('#ck-miss').value});
   await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); render.chk(); }
 async function mark(id){ await rpc('checklist_mark',{p_mark_id:id}); toast('Marked ✓'); render[TAB](); }
+async function ckRetire(id){ if(!confirm('Retire this duty? It stops recurring and pending marks are withdrawn. History is kept.')) return;
+  await rpc('checklist_retire',{p_checklist_id:id}); toast('Retired'); render.chk(); }
 async function history_(id){ const rs = await q('v_task_revisions', x=>x.eq('task_id',id).order('changed_at'));
   $('#dlg').innerHTML = `<div class="t-title">Deadline history</div>` +
     rs.map(r=>`<p class="t-sub" style="margin-top:8px"><b>${fmt(r.old_due)} → ${fmt(r.new_due)}</b> · ${esc(r.changed_by_name)}<br>${esc(r.reason)}</p>`).join('') +
