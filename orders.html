@@ -169,6 +169,7 @@ const render = {
         <div class="${od.length?'alert':''}"><b>${od.length}</b><span>lines past DP</span></div>
         <div><b>${soon.length}</b><span>due ≤30 days</span></div>
         <div><b>${lines.length}</b><span>lines open</span></div>
+        ${noDP.length?`<div class="${noDP.length?'alert':''}"><b>${noDP.length}</b><span>no DP set</span></div>`:''}
       </div>
       <h2>Past DP — LD risk, act first</h2>${block(od,'Nothing overdue. ✓')}
       <h2>Closing in — next 30 days</h2>${block(soon,'Nothing due this month.')}
