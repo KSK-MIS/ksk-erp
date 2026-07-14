@@ -82,7 +82,7 @@ async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(err
 async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
 const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
 
-const TABS = [['pending','Pending'],['reg','Register'],['new','New PO'],['value','Value']];
+const TABS = [['pending','Pending'],['ext','Extensions'],['reg','Register'],['new','New PO'],['value','Value']];
 function drawNav(){
   const t = isAdmin() ? TABS : TABS.filter(x=>!['new','value'].includes(x[0]));
   $('#nav').innerHTML = t.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
@@ -175,6 +175,70 @@ const render = {
       <h2>Closing in — next 30 days</h2>${block(soon,'Nothing due this month.')}
       ${noDP.length?`<h2>No DP recorded</h2>${block(noDP,'')}`:''}`;
   },
+  async ext(){
+    const [pos, unp, pend, granted, ld] = await Promise.all([
+      q('v_pos'),
+      q('v_unprotected_overdue', x=>x.order('days_overdue',{ascending:false})),
+      q('v_ext_pending', x=>x.order('days_waiting',{ascending:false})),
+      q('v_dp_extensions', x=>x.not('granted_on','is',null).order('granted_on',{ascending:false})),
+      isAdmin() ? q('v_ld_exposure') : Promise.resolve([])
+    ]);
+    const byPo = Object.fromEntries(pos.map(p=>[p.id,p]));
+    const ldByLine = Object.fromEntries(ld.map(x=>[x.line_id,x]));
+    const ldTotal = ld.reduce((s,x)=>s+Number(x.ld_amount||0),0);
+    const who = id => byPo[id] ? `${esc(byPo[id].customer)} <span class="muted">${byPo[id].po_no}</span>` : '—';
+
+    // 1. Overdue with NO extension applied for — live LD risk, no cover.
+    const unpBlock = !unp.length
+      ? '<p class="muted" style="margin:0 4px 10px">Every overdue line has an extension on record. ✓</p>'
+      : unp.map(l=>`<div class="card">
+          <div class="row"><div class="grow">
+            <div class="t-title">${who(l.po_id)}</div>
+            <div class="t-sub" style="color:#233">${esc(l.item)} <span class="muted">${esc(l.drawing_no||'')}</span></div>
+            <div class="t-sub">bal <b>${num(l.balance)}</b> ${esc(l.uom||'')} of ${num(l.qty_ordered)} · DP ${fmt(l.dp_current)}</div>
+          </div><span class="tag late">${l.days_overdue}d OVERDUE</span></div>
+          ${isAdmin()?`<div class="row" style="margin-top:9px">
+            <button class="a gold" onclick="extendDP(null,'${l.line_id}','${esc(l.item)}')">⟳ Apply for extension</button>
+          </div>`:''}</div>`).join('');
+
+    // 2. Applied for, no reply yet.
+    const pendBlock = !pend.length
+      ? '<p class="muted" style="margin:0 4px 10px">Nothing awaiting a reply.</p>'
+      : pend.map(e=>`<div class="card">
+          <div class="row"><div class="grow">
+            <div class="t-title">${who(e.po_id)}</div>
+            <div class="t-sub">${e.line_id?'Line-level':'<b>Whole PO</b>'} · applied ${fmt(e.applied_on)} · asked for DP ${fmt(e.dp_requested)}
+              ${e.remarks?'<br>'+esc(e.remarks):''}</div>
+          </div><span class="tag ${e.days_waiting>21?'late':'soon'}">${e.days_waiting}d waiting</span></div>
+          ${isAdmin()?`<div class="row" style="margin-top:9px">
+            <button class="a dark" onclick="grantExt('${e.id}','${fmt(e.dp_requested)}','${e.dp_requested}')">✓ Record grant</button>
+          </div>`:''}</div>`).join('');
+
+    // 3. Granted — history, with LD exposure for Director/Admin.
+    const grantBlock = !granted.length
+      ? '<p class="muted" style="margin:0 4px 10px">No extensions granted yet.</p>'
+      : `<table><tr><th>PO / scope</th><th>Applied</th><th>Granted</th><th>Revised DP</th><th>LD</th>${isAdmin()?'<th class="n">Exposure</th>':''}</tr>
+         ${granted.map(e=>{
+           const x = e.line_id ? ldByLine[e.line_id] : null;
+           return `<tr><td>${who(e.po_id)}<br><span class="muted">${e.line_id?'line':'whole PO'}</span></td>
+             <td>${fmt(e.applied_on)}</td><td>${fmt(e.granted_on)}</td><td><b>${fmt(e.revised_dp)}</b></td>
+             <td>${e.ld_applicable
+                  ? `<span class="tag late">LD ${e.ld_rate_pct_per_week}%/wk · cap ${e.ld_cap_pct}%</span>${e.ld_clause?'<br><span class="muted">'+esc(e.ld_clause)+'</span>':''}`
+                  : '<span class="tag ok">clean</span>'}</td>
+             ${isAdmin()?`<td class="n">${x?`<b>${money(x.ld_amount)}</b><br><span class="muted">${x.ld_pct}% · ${x.weeks_late}w late</span>`:'—'}</td>`:''}</tr>`;
+         }).join('')}</table>`;
+
+    $('#main').innerHTML = `<div class="kpi">
+        <div class="${unp.length?'alert':''}"><b>${unp.length}</b><span>overdue, no extension</span></div>
+        <div><b>${pend.length}</b><span>awaiting reply</span></div>
+        <div><b>${granted.length}</b><span>granted</span></div>
+        ${isAdmin()&&ld.length?`<div class="alert"><b style="font-size:15px">${money(ldTotal)}</b><span>LD exposure</span></div>`:''}
+      </div>
+      <h2>Overdue with no extension — LD running, no cover</h2>${unpBlock}
+      <h2>Applied for — awaiting reply</h2>${pendBlock}
+      <h2>Granted</h2>${grantBlock}
+      ${isAdmin()?`<p class="muted" style="margin:10px 4px">LD exposure is an estimate: value of the undelivered balance × rate per week from the <b>original</b> DP, capped. Money is visible to Director &amp; Admin only — enforced in the database.</p>`:''}`;
+  },
   async reg(){
     const pos = await q('v_pos', x=>x.order('created_at',{ascending:false}));
     const g = pos.filter(p=>p.po_type==='GOVT'), pv = pos.filter(p=>p.po_type==='PVT');
@@ -256,9 +320,11 @@ async function openPO(id){
     </div>`:''}
     <h2>Lines (${lines.length})</h2>
     ${lines.map(l=>lineRow(l, admin)).join('') || '<p class="muted">No lines yet.</p>'}
-    ${ext.length?`<h2>DP extensions</h2><table><tr><th>Applied</th><th>Granted</th><th>Revised DP</th><th>Scope</th></tr>
-      ${ext.map(e=>`<tr><td>${fmt(e.applied_on)}</td><td>${e.granted_on?fmt(e.granted_on):'<span class="tag soon">pending</span>'}</td>
-        <td>${fmt(e.revised_dp)}</td><td>${e.line_id?esc(nameOf(e.line_id)):'whole PO'}</td></tr>`).join('')}</table>`:''}
+    ${ext.length?`<h2>DP extensions</h2><table><tr><th>Applied</th><th>Granted</th><th>Revised DP</th><th>Scope</th><th>LD</th></tr>
+      ${ext.map(e=>`<tr><td>${fmt(e.applied_on)}</td>
+        <td>${e.granted_on?fmt(e.granted_on):(admin?`<button class="a" onclick="dlg.close();grantExt('${e.id}','${fmt(e.revised_dp)}','${e.revised_dp}')">record grant</button>`:'<span class="tag soon">pending</span>')}</td>
+        <td>${fmt(e.revised_dp)}</td><td>${e.line_id?esc(nameOf(e.line_id)):'whole PO'}</td>
+        <td>${e.granted_on ? (e.ld_applicable?`<span class="tag late">LD ${e.ld_rate_pct_per_week}%/wk · cap ${e.ld_cap_pct}%</span>`:'<span class="tag ok">clean</span>') : '—'}</td></tr>`).join('')}</table>`:''}
     ${ds.length?`<h2>Dispatches (${ds.length})</h2><table><tr><th>Date</th><th>Item</th><th class="n">Qty</th><th>Ref</th></tr>
       ${ds.map(d=>`<tr><td>${fmt(d.dispatch_date)}</td><td>${esc(nameOf(d.line_id))}</td><td class="n">${num(d.qty)}</td><td>${esc(d.ref||'—')}</td></tr>`).join('')}</table>`:''}
     <button class="a" style="width:100%;margin-top:14px" onclick="dlg.close()">Close</button>`;
@@ -311,19 +377,50 @@ function addDispatch(lineId, balance){
   };
   $('#dlg').showModal();
 }
+// Apply for an extension. LD terms are NOT set here — they arrive with the grant letter.
 function extendDP(poId, lineId, what){
-  $('#dlg').innerHTML = `<div class="t-title">DP extension — ${esc(what)}</div>
-    <p class="muted" style="margin-top:3px">Applied but not yet granted? Leave "granted" empty — the DP only moves when the railway grants it.</p>
+  $('#dlg').innerHTML = `<div class="t-title">Apply for DP extension — ${esc(what)}</div>
+    <p class="muted" style="margin-top:3px">This logs the application only. The DP does not move until the extension is granted — record the grant (and any LD clause) when the letter arrives.</p>
     <div class="row"><div class="grow"><label>Applied on</label><input id="x-app" type="date" value="${today()}"></div>
-      <div class="grow"><label>Granted on</label><input id="x-gr" type="date"></div></div>
-    <label>Revised DP</label><input id="x-dp" type="date">
-    <label>Remarks (MA no., denial clause, LD…)</label><textarea id="x-rem" rows="2"></textarea>
-    <div class="row" style="margin-top:12px"><button class="a gold grow" id="x-ok">Save</button>
+      <div class="grow"><label>DP asked for</label><input id="x-dp" type="date"></div></div>
+    <label>Remarks (letter ref, reason…)</label><textarea id="x-rem" rows="2"></textarea>
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="x-ok">Log application</button>
       <button class="a" onclick="dlg.close()">Cancel</button></div>`;
   $('#x-ok').onclick = async ()=>{
+    if(!$('#x-dp').value) return toast('Enter the DP you are asking for');
     await rpc('dp_extend', { p_po_id:poId, p_line_id:lineId, p_applied:$('#x-app').value||null,
-      p_granted:$('#x-gr').value||null, p_revised:$('#x-dp').value||null, p_remarks:$('#x-rem').value||null });
-    toast($('#x-gr').value ? 'Granted — DP moved' : 'Application logged');
+      p_granted:null, p_revised:$('#x-dp').value, p_remarks:$('#x-rem').value||null });
+    toast('Application logged — DP unchanged until granted');
+    $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+// Record the grant. This is where LD terms are captured and the DP finally moves.
+function grantExt(extId, askedLabel, askedIso){
+  $('#dlg').innerHTML = `<div class="t-title">Record extension grant</div>
+    <p class="muted" style="margin-top:3px">You asked for <b>${esc(askedLabel)}</b>. Enter what was actually granted. Granting moves the working DP.</p>
+    <div class="row"><div class="grow"><label>Granted on</label><input id="g-on" type="date" value="${today()}"></div>
+      <div class="grow"><label>Revised DP granted</label><input id="g-dp" type="date" value="${esc(askedIso||'')}"></div></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
+      <input id="g-ld" type="checkbox" style="width:auto" onchange="document.getElementById('ld-wrap').style.display=this.checked?'block':'none'">
+      Granted <b>with LD</b> (liquidated damages)</label>
+    <div id="ld-wrap" style="display:none;border-left:3px solid #e5484d;padding-left:10px;margin-top:8px">
+      <div class="row"><div class="grow"><label>LD rate (% per week)</label><input id="g-rate" type="number" step="0.01" placeholder="e.g. 0.5"></div>
+        <div class="grow"><label>Cap (% max)</label><input id="g-cap" type="number" step="0.01" placeholder="e.g. 10"></div></div>
+      <label>Clause reference</label><input id="g-cl" placeholder="e.g. IRS Conditions of Contract, cl. 0702">
+      <p class="muted" style="margin:6px 0 0">Exposure accrues from the <b>original</b> DP on the undelivered balance, capped.</p>
+    </div>
+    <label>Remarks (letter ref…)</label><textarea id="g-rem" rows="2"></textarea>
+    <div class="row" style="margin-top:12px"><button class="a dark grow" id="g-ok">Record grant</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#g-ok').onclick = async ()=>{
+    const ld = $('#g-ld').checked;
+    if(!$('#g-dp').value) return toast('Enter the revised DP that was granted');
+    if(ld && (!$('#g-rate').value || !$('#g-cap').value)) return toast('LD needs both a rate and a cap');
+    await rpc('dp_extension_grant', { p_ext_id:extId, p_granted:$('#g-on').value, p_revised:$('#g-dp').value,
+      p_ld_applicable:ld, p_ld_rate:ld?Number($('#g-rate').value):null, p_ld_cap:ld?Number($('#g-cap').value):null,
+      p_ld_clause:ld?($('#g-cl').value||null):null, p_remarks:$('#g-rem').value||null });
+    toast(ld ? 'Granted with LD — DP moved, exposure now tracked' : 'Granted clean — DP moved');
     $('#dlg').close(); render[TAB]();
   };
   $('#dlg').showModal();
