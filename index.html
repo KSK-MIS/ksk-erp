@@ -249,6 +249,9 @@ async function loadBrief(){
   if(b.qtn_stale > 0)
     alerts.push(alertRow('amb', `${b.qtn_stale} quotations older than 30 days`,
       'Sent, no order, no follow-up on record.', './sales.html'));
+  if(o.pos_linked === 0 && o.pos_live > 0)
+    alerts.push(alertRow('amb', 'No order is tagged to the quotation that won it',
+      `${o.pos_live} live POs, none linked. Until they are, this system cannot tell you a win rate — and will not invent one.`, './sales.html'));
   if((b.me?.tasks_overdue||0) > 0)
     alerts.push(alertRow('red', `${b.me.tasks_overdue} of your own tasks are overdue`,
       'Your name is on these.', './kartavya.html'));

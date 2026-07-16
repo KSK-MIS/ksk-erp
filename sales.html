@@ -122,12 +122,15 @@ render.funnel = async () => {
   const vQtn = QTN.reduce((a,b)=>a+Number(b.quotation_amount||0),0);
   const vOrd = live.reduce((a,b)=>a+Number(b.po_value||0),0);
   const nOrd = live.length;
+  const nLinked = live.filter(p=>p.qtn_no).length;
   const stale = QTN.filter(x=>x.age_days>30).length;
 
+  // Only the first two steps are a funnel — enquiry and quotation share a number.
+  // A PO carries no link back to a quotation unless someone records one, so
+  // "converted" is shown as what it is: the count we can actually prove.
   const steps = [
-    ['Enquiries received', nEnq, nEnq, ''],
-    ['Quoted', nQtd, nEnq, cr(vQtn)],
-    ['Converted to order', nOrd, nEnq, cr(vOrd)]
+    ['Enquiries received', nEnq, cr(0), false],
+    ['Quoted', nQtd, cr(vQtn), true]
   ];
   const fbar = steps.map((s,i)=>{
     const pct = Math.max(4, Math.round(100*s[1]/Math.max(1,nEnq)));
@@ -135,18 +138,25 @@ render.funnel = async () => {
     const lost = prev!=null && prev>s[1] ? `<div class="drop">↓ ${prev - s[1]} lost here</div>` : '';
     return `${i?lost:''}<div class="fstep"><i class="fill" style="width:${pct}%"></i>
       <div class="fc"><b>${s[1]}</b><span class="lab">${s[0]}</span>
-      <span class="val">${isAdmin()? s[3] : ''}</span></div></div>`;
+      <span class="val">${(isAdmin() && s[3])? s[2] : ''}</span></div></div>`;
   }).join('');
+
+  const linkPct = Math.round(100*nLinked/Math.max(1,nOrd));
 
   $('#main').innerHTML = `
     <div class="kpi">
       <div><b>${nEnq}</b><span>Enquiries FY26-27</span></div>
       <div><b>${Math.round(100*nQtd/Math.max(1,nEnq))}%</b><span>Quote rate</span></div>
-      <div class="${nOrd? '':'alert'}"><b>${Math.round(100*nOrd/Math.max(1,nEnq))}%</b><span>Win rate</span></div>
+      <div class="${nLinked?'':'alert'}"><b>${linkPct}%</b><span>POs traced to a quote</span></div>
     </div>
     <h2>The funnel</h2>
     ${fbar}
-    <p class="muted" style="margin:8px 4px 0">Win rate compares live purchase orders against enquiries logged this year. An order can land against an enquiry from an earlier year, so read it as a direction, not a ledger.</p>
+    <div class="card" style="margin-top:6px;border-left:3px solid var(--warn)">
+      <div class="t-title">Win rate: not yet measurable</div>
+      <div class="t-sub">There are ${nOrd} live purchase orders, and ${nLinked} of them record which quotation
+      they came from. Until that link is captured, any conversion percentage would be a guess — so this screen
+      does not show one. Open a PO in Orders and tag its quotation to start building the number.</div>
+    </div>
 
     <h2>Where attention is needed</h2>
     <div class="card"><div class="row">

@@ -350,7 +350,10 @@ async function openPO(id){
       <div class="t-sub">${p.po_no} · their no. ${esc(p.external_po_no||'—')} of ${fmt(p.external_po_date)}
         ${p.zone?'<br>Zone: '+esc(p.zone):''}<br>Consignee: ${esc(p.consignee||'—')}
         <br>Inspection: ${esc(p.inspection_agency||'—')} · PO-level DP: ${fmt(p.dp_current)}
-        ${p.remarks?'<br>'+esc(p.remarks):''}</div></div>
+        ${p.remarks?'<br>'+esc(p.remarks):''}
+        <br>Won against: ${p.qtn_no?`<b>${esc(p.qtn_no)}</b>${p.enq_no?` · enq ${esc(p.enq_no)}`:''}`:'<span style="color:#a96b00">not recorded</span>'}
+        ${admin?` <button class="a" style="padding:2px 7px;font-size:11px" onclick="linkQtn('${p.id}','${esc(p.qtn_no||'')}')">${p.qtn_no?'change':'tag quotation'}</button>`:''}
+        </div></div>
       <span class="tag ${p.po_type}">${p.po_type}</span></div>
     ${derived(p)?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
       <div class="t-title" style="color:#8a5a00">FY26-27 sales record — balances are not meaningful</div>
@@ -478,6 +481,23 @@ function invoiceSet(lineId){
   $('#i-ok').onclick = async ()=>{
     await rpc('line_invoice_set', { p_line_id:lineId, p_status:$('#i-st').value });
     toast('Saved'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+// Tag the quotation this PO was won against. Without this, no honest win rate exists.
+async function linkQtn(poId, current){
+  const qs = await q('v_quotations', x=>x.order('qtn_date',{ascending:false}));
+  $('#dlg').innerHTML = `<div class="t-title">Which quotation won this order?</div>
+    <p class="muted" style="margin-top:3px">This is the link the Sales funnel needs. Leave blank if the order came in without a quotation from us.</p>
+    <label>Quotation</label>
+    <select id="lq"><option value="">— none / not known —</option>
+      ${qs.map(x=>`<option value="${esc(x.qtn_no)}" ${x.qtn_no===current?'selected':''}>${esc(x.qtn_no)} · ${esc((x.customer||'').slice(0,32))} · ${fmt(x.qtn_date)}</option>`).join('')}
+    </select>
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="lq-ok">Save</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#lq-ok').onclick = async ()=>{
+    await rpc('po_link_quotation', { p_po_id:poId, p_qtn_no:$('#lq').value || null });
+    toast('Linked'); $('#dlg').close(); render[TAB]();
   };
   $('#dlg').showModal();
 }
