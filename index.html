@@ -1,10 +1,12 @@
 <!doctype html>
 <!-- ============================================================
-     KSK ERP 1.0 — Portal & Phase 0 Admin (index.html)
+     KSK ERP 1.0 — Portal, Director Brief & Phase 0 Admin (index.html)
      Deploys on: GitHub Pages (upload this whole file, never edit)
      Backend: Supabase project ksk-erp (Mumbai)
      The anon key below is PUBLIC BY DESIGN — every row is guarded
      by Row-Level Security inside the database, not by this file.
+     The brief is one RPC: director_brief(). Money keys come back
+     null for Staff — the gate is in Postgres, not here.
      ============================================================ -->
 <html lang="en">
 <head>
@@ -13,7 +15,7 @@
 <title>KSK ERP 1.0</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; }
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
   * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   body { background:var(--bg); min-height:100vh; }
   header { background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
@@ -21,14 +23,16 @@
   header h1 { font-size:17px; font-weight:600; flex:1; }
   header small { display:block; font-weight:400; opacity:.75; font-size:11px; }
   .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:999px; padding:4px 10px; font-size:12px; }
-  main { max-width:520px; margin:0 auto; padding:16px; }
+  main { max-width:560px; margin:0 auto; padding:16px; }
   .card { background:#fff; border-radius:14px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:18px; margin-bottom:14px; }
   h2 { font-size:15px; color:var(--navy); margin-bottom:10px; }
+  h3 { font-size:12.5px; color:#667; margin:18px 2px 8px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
   label { display:block; font-size:12px; color:#555; margin:10px 0 4px; }
   input, select { width:100%; padding:12px; border:1px solid #cfd6e0; border-radius:10px; font-size:15px; background:#fff; }
   button { width:100%; padding:13px; margin-top:14px; border:0; border-radius:10px; background:var(--navy); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
   button.gold { background:var(--gold); color:var(--navy); }
   button.ghost { background:#e8ecf2; color:var(--navy); }
+  button.sm { width:auto; padding:8px 12px; margin:0; font-size:12.5px; border-radius:8px; }
   .muted { color:#667; font-size:12.5px; line-height:1.5; }
   .msg { margin-top:12px; padding:10px 12px; border-radius:8px; font-size:13.5px; display:none; }
   .msg.ok  { display:block; background:#e6f4ea; color:var(--ok); }
@@ -45,10 +49,31 @@
   .tag.STAFF { background:#e8f0ea; color:#2e6b3e; }
   .tag.off { background:#f1d5d8; color:var(--bad); }
   .tiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .tile { background:#fff; border-radius:14px; padding:16px 14px; box-shadow:0 1px 4px rgba(15,36,64,.08); }
+  .tile { background:#fff; border-radius:14px; padding:16px 14px; box-shadow:0 1px 4px rgba(15,36,64,.08); position:relative; }
   .tile b { color:var(--navy); font-size:14px; display:block; margin-bottom:4px; }
   .tile span { font-size:11.5px; color:#889; }
   .tile.soon { opacity:.55; }
+  .tile .dot { position:absolute; top:12px; right:12px; background:var(--bad); color:#fff; font-size:10.5px; font-weight:700;
+               min-width:19px; height:19px; border-radius:99px; display:flex; align-items:center; justify-content:center; padding:0 5px; }
+  /* brief */
+  .hero { background:var(--navy); color:#fff; border-radius:14px; padding:16px; margin-bottom:14px; }
+  .hero .as { font-size:11px; opacity:.6; }
+  .hero .big { font-size:27px; font-weight:700; margin:6px 0 2px; }
+  .hero .sub { font-size:12.5px; opacity:.8; line-height:1.5; }
+  .hero .split { display:flex; gap:14px; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,.15); }
+  .hero .split div { flex:1; }
+  .hero .split b { display:block; font-size:16px; }
+  .hero .split span { font-size:10.5px; opacity:.65; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+  .kpi div { background:#fff; border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
+  .kpi b { font-size:20px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
+  .kpi .alert b { color:var(--bad); } .kpi .warn b { color:var(--warn); }
+  .alert-row { display:flex; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid #f2f4f8; }
+  .alert-row:last-child { border-bottom:0; }
+  .alert-row .ic { width:8px; height:8px; border-radius:99px; margin-top:6px; flex-shrink:0; }
+  .alert-row .ic.red { background:var(--bad); } .alert-row .ic.amb { background:var(--warn); } .alert-row .ic.grn { background:var(--ok); }
+  .alert-row .tx { flex:1; } .alert-row .tx b { font-size:13.5px; color:#182b45; display:block; }
+  .alert-row .tx span { font-size:12px; color:#778; line-height:1.45; }
   #screen-app, #screen-login, #screen-denied { display:none; }
 </style>
 </head>
@@ -88,10 +113,14 @@
   <!-- ============ PORTAL ============ -->
   <section id="screen-app">
 
+    <div id="brief"><p class="muted" style="padding:20px;text-align:center">Reading the business…</p></div>
+
+    <h3>Modules</h3>
     <div class="tiles" style="margin-bottom:14px">
-      <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Kartavya</b><span>My Tasks · Delegation · Capture</span></a>
+      <a class="tile" href="./orders.html" style="text-decoration:none"><b>Orders</b><span>Pending register · DP · dispatch · LD</span><i class="dot" id="d-ord" style="display:none"></i></a>
+      <a class="tile" href="./sales.html" style="text-decoration:none"><b>Sales</b><span>Enquiry → Quotation → Order</span><i class="dot" id="d-sal" style="display:none"></i></a>
+      <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Kartavya</b><span>My tasks · Delegation · Capture</span><i class="dot" id="d-kar" style="display:none"></i></a>
       <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Checklists</b><span>Recurring duties &amp; scoreboard</span></a>
-      <a class="tile" href="./orders.html" style="text-decoration:none"><b>Orders</b><span>Pending order register · DP &amp; dispatch</span></a>
     </div>
 
     <div class="card" id="admin-card" style="display:none">
@@ -134,6 +163,14 @@ const sb = supabase.createClient(SUPABASE_URL, ANON_KEY);
 const $ = id => document.getElementById(id);
 let ME = null;
 
+const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function cr(n){ if(n==null) return '';
+  n = Number(n);
+  if(n >= 1e7) return '₹' + (n/1e7).toFixed(2) + ' cr';
+  if(n >= 1e5) return '₹' + (n/1e5).toFixed(1) + ' L';
+  return '₹' + n.toLocaleString('en-IN',{maximumFractionDigits:0});
+}
+const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}) : '';
 function show(id){ ['screen-login','screen-denied','screen-app'].forEach(s => $(s).style.display = s===id ? 'block':'none'); }
 function msg(id, text, cls){ const m=$(id); m.textContent=text; m.className='msg '+cls; }
 
@@ -154,6 +191,80 @@ $('btn-login').onclick = async () => {
 
 async function signOut(){ await sb.auth.signOut(); location.reload(); }
 
+// ================= THE BRIEF =================
+function dot(id, n){ const e=$(id); if(!e) return;
+  if(n>0){ e.textContent = n>99?'99+':n; e.style.display='flex'; } else e.style.display='none'; }
+
+function alertRow(colour, title, sub, href){
+  return `<div class="alert-row"><i class="ic ${colour}"></i><div class="tx">
+    <b>${title}</b><span>${sub}</span></div>
+    ${href?`<a href="${href}"><button class="ghost sm">Open</button></a>`:''}</div>`;
+}
+
+async function loadBrief(){
+  const { data:b, error } = await sb.rpc('director_brief');
+  if(error){ $('brief').innerHTML = `<div class="card"><p class="muted">Brief unavailable: ${esc(error.message)}</p></div>`; return; }
+  const mon = b.orders.book_value != null;   // the DB decided, not this file
+  const o = b.orders, ld = b.ld || {}, up = b.unprotected, s = b.sales;
+
+  dot('d-ord', o.pos_overdue);
+  dot('d-sal', s.not_quoted);
+  dot('d-kar', (b.me?.tasks_overdue)||0);
+
+  // ---- hero: the one number that matters ----
+  const hero = mon
+    ? `<div class="hero">
+        <div class="as">Order book as of ${fmt(b.as_of)}</div>
+        <div class="big">${cr(o.open_value)}</div>
+        <div class="sub">still to ship, across ${o.lines_open} open lines in ${o.pos_open} purchase orders.<br>
+        Total booked this year: ${cr(o.book_value)} over ${o.pos_live} POs.</div>
+        <div class="split">
+          <div><b>${cr(ld.amount||0)}</b><span>LD exposure, ${ld.lines_exposed||0} lines</span></div>
+          <div><b>${cr(s.quoted_value)}</b><span>quoted, ${s.quoted} of ${s.enquiries} enquiries</span></div>
+        </div>
+      </div>`
+    : `<div class="hero">
+        <div class="as">As of ${fmt(b.as_of)}</div>
+        <div class="big">${o.lines_open} lines open</div>
+        <div class="sub">across ${o.pos_open} purchase orders. ${o.lines_overdue} are past their delivery period.</div>
+      </div>`;
+
+  // ---- what needs a decision ----
+  const alerts = [];
+  if(o.pos_overdue > 0)
+    alerts.push(alertRow('red', `${o.lines_overdue} lines past DP in ${o.pos_overdue} POs`,
+      'Delivery period has passed and stock has not gone out.', './orders.html'));
+  if(up.lines > 0)
+    alerts.push(alertRow('red', `${up.lines} overdue lines with no extension applied for`,
+      `The oldest is ${up.worst_days} days late. Every week without a granted extension is LD the railway can levy.`, './orders.html'));
+  if(mon && ld.amount > 0)
+    alerts.push(alertRow('amb', `${cr(ld.amount)} of LD exposure is live`,
+      `Worst single PO: ${esc(ld.worst?.po_no||'')} — ${cr(ld.worst?.amount)}. ${esc((ld.worst?.customer||'').slice(0,60))}`, './orders.html'));
+  if(b.ext_pending > 0)
+    alerts.push(alertRow('amb', `${b.ext_pending} extension applications awaiting a reply`,
+      'Applied for, not yet granted. The DP has not moved.', './orders.html'));
+  if(s.not_quoted > 0)
+    alerts.push(alertRow('amb', `${s.not_quoted} enquiries never quoted`,
+      'A customer asked and got silence.', './sales.html'));
+  if(b.qtn_stale > 0)
+    alerts.push(alertRow('amb', `${b.qtn_stale} quotations older than 30 days`,
+      'Sent, no order, no follow-up on record.', './sales.html'));
+  if((b.me?.tasks_overdue||0) > 0)
+    alerts.push(alertRow('red', `${b.me.tasks_overdue} of your own tasks are overdue`,
+      'Your name is on these.', './kartavya.html'));
+  if(!alerts.length)
+    alerts.push(alertRow('grn', 'Nothing is on fire', 'No overdue lines, no unprotected exposure, no silent enquiries.'));
+
+  $('brief').innerHTML = hero + `
+    <div class="kpi">
+      <div class="${o.lines_overdue?'alert':''}"><b>${o.lines_overdue}</b><span>Lines past DP</span></div>
+      <div class="${up.lines?'alert':''}"><b>${up.lines}</b><span>Unprotected</span></div>
+      <div><b>${b.dispatch_30d.count}</b><span>Dispatches 30d</span></div>
+    </div>
+    <h3>Needs a decision</h3>
+    <div class="card">${alerts.join('')}</div>`;
+}
+
 async function route(session){
   if(!session){ show('screen-login'); return; }
   const { data, error } = await sb.rpc('my_profile');
@@ -162,6 +273,7 @@ async function route(session){
   $('who').style.display='block';
   $('who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
   show('screen-app');
+  loadBrief();
   if(ME.role === 'DIRECTOR' || ME.role === 'ADMIN'){
     $('admin-card').style.display='block';
     loadUsers();

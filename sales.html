@@ -1,0 +1,302 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Module 3: SALES (Enquiry → Quotation → Order)
+     Tabs: Funnel · Enquiries · Quotations · Customers
+     Deploys on: GitHub Pages beside index.html. Upload whole, never edit.
+     Money is visible here to ADMIN/DIRECTOR only — enforced in Postgres,
+     not in this file. The screen asks; the database decides.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sales · KSK ERP</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { background:var(--bg); min-height:100vh; padding-bottom:70px; }
+  header { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
+  header a { color:var(--gold); text-decoration:none; font-size:20px; }
+  header h1 { font-size:16px; flex:1; } header h1 small { display:block; font-weight:400; opacity:.7; font-size:11px; }
+  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:3px 9px; font-size:11.5px; }
+  nav { display:flex; overflow-x:auto; background:#fff; border-bottom:1px solid #e2e7ee; position:sticky; top:53px; z-index:4; }
+  nav button { flex:1; min-width:86px; padding:11px 6px; border:0; background:none; font-size:12.5px; font-weight:600; color:#667; border-bottom:3px solid transparent; cursor:pointer; }
+  nav button.on { color:var(--navy); border-color:var(--gold); }
+  main { max-width:560px; margin:0 auto; padding:12px; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:14px; margin-bottom:10px; }
+  .card.clickable { cursor:pointer; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  .t-title { font-size:14.5px; font-weight:600; color:#182b45; }
+  .t-sub { font-size:12px; color:#778; margin-top:2px; line-height:1.45; }
+  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
+  .tag.late { background:#fdeaea; color:var(--bad); } .tag.ok { background:#e6f4ea; color:var(--ok); }
+  .tag.soon { background:#fff3d6; color:var(--warn); } .tag.info { background:#e2ecff; color:#1c4fa0; }
+  .tag.Railway { background:#e2ecff; color:#1c4fa0; }
+  .tag.Fabrication { background:#efe7f7; color:#5b3a86; }
+  .tag.RollingMill { background:#e8f0ea; color:#2e6b3e; }
+  button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
+  button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
+  input, select, textarea { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
+  label { font-size:11.5px; color:#556; display:block; margin-top:8px; }
+  h2 { font-size:13.5px; color:var(--navy); margin:14px 2px 8px; }
+  .muted { color:#778; font-size:12.5px; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .kpi div { background:#fff; border-radius:10px; padding:10px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
+  .kpi b { font-size:19px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
+  .kpi .alert b { color:var(--bad); }
+  .bar { height:6px; background:#eef1f5; border-radius:99px; overflow:hidden; margin-top:7px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:#788; font-size:10.5px; padding:6px 4px; border-bottom:1px solid #eef; }
+  td { padding:8px 4px; border-bottom:1px solid #f2f4f8; }
+  td.n, th.n { text-align:right; }
+  /* funnel */
+  .fstep { background:#fff; border-radius:12px; padding:12px 14px; margin-bottom:6px; box-shadow:0 1px 3px rgba(15,36,64,.07); position:relative; overflow:hidden; }
+  .fstep i.fill { position:absolute; inset:0 auto 0 0; background:#eef3fb; z-index:0; }
+  .fstep .fc { position:relative; z-index:1; display:flex; align-items:baseline; gap:8px; }
+  .fstep b { font-size:17px; color:var(--navy); } .fstep .lab { font-size:12px; color:#667; flex:1; }
+  .fstep .val { font-size:12px; color:#445; font-weight:600; }
+  .drop { text-align:center; font-size:11px; color:#a66; padding:1px 0 3px; }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
+  dialog { border:0; border-radius:14px; padding:18px; width:min(94vw,480px); max-height:88vh; }
+  dialog::backdrop { background:rgba(15,36,64,.5); }
+</style>
+</head>
+<body>
+<header>
+  <a href="./index.html">←</a>
+  <h1>Sales <small>Enquiry → Quotation → Order · KSK ERP 1.0</small></h1>
+  <div class="chip" id="who"></div>
+</header>
+<nav id="nav"></nav>
+<main id="main"><p class="muted" style="padding:30px;text-align:center">Loading…</p></main>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+
+<script>
+const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
+const $ = s => document.querySelector(s);
+let ME = null, TAB = 'funnel';
+let ENQ = [], QTN = [], CUS = [], FUN = [];
+let ENQF = 'all', QTNF = 'all';
+const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
+const today = () => new Date().toISOString().slice(0,10);
+const num = n => (n==null||n==='') ? '—' : Number(n).toLocaleString('en-IN');
+const money = n => (n==null) ? '—' : '₹' + Number(n).toLocaleString('en-IN',{maximumFractionDigits:0});
+// Indian short money: 1,23,45,678 -> ₹1.23 cr
+function cr(n){ n = Number(n||0);
+  if(n >= 1e7) return '₹' + (n/1e7).toFixed(2) + ' cr';
+  if(n >= 1e5) return '₹' + (n/1e5).toFixed(1) + ' L';
+  return money(n);
+}
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
+async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
+async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
+const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
+const divClass = d => (d||'').replace(/\s/g,'');
+
+const TABS = [['funnel','Funnel'],['enq','Enquiries'],['qtn','Quotations'],['cus','Customers']];
+function drawNav(){
+  $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
+}
+function go(t){ TAB=t; drawNav(); render[t](); }
+
+const render = {};
+
+// ================= FUNNEL =================
+render.funnel = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!FUN.length) FUN = await q('v_sales_funnel');
+  if(!ENQ.length) ENQ = await q('v_enquiries', x=>x.order('enq_date',{ascending:false}));
+  if(!QTN.length) QTN = await q('v_quotations', x=>x.order('qtn_date',{ascending:false}));
+  const pos = await q('v_po_value');
+  const live = pos.filter(p=>p.qty_basis!=='DISPATCH_DERIVED');
+
+  const nEnq = ENQ.length;
+  const nQtd = ENQ.filter(e=>e.quoted).length;
+  const nQtn = QTN.length;
+  const vQtn = QTN.reduce((a,b)=>a+Number(b.quotation_amount||0),0);
+  const vOrd = live.reduce((a,b)=>a+Number(b.po_value||0),0);
+  const nOrd = live.length;
+  const stale = QTN.filter(x=>x.age_days>30).length;
+
+  const steps = [
+    ['Enquiries received', nEnq, nEnq, ''],
+    ['Quoted', nQtd, nEnq, cr(vQtn)],
+    ['Converted to order', nOrd, nEnq, cr(vOrd)]
+  ];
+  const fbar = steps.map((s,i)=>{
+    const pct = Math.max(4, Math.round(100*s[1]/Math.max(1,nEnq)));
+    const prev = i? steps[i-1][1] : null;
+    const lost = prev!=null && prev>s[1] ? `<div class="drop">↓ ${prev - s[1]} lost here</div>` : '';
+    return `${i?lost:''}<div class="fstep"><i class="fill" style="width:${pct}%"></i>
+      <div class="fc"><b>${s[1]}</b><span class="lab">${s[0]}</span>
+      <span class="val">${isAdmin()? s[3] : ''}</span></div></div>`;
+  }).join('');
+
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${nEnq}</b><span>Enquiries FY26-27</span></div>
+      <div><b>${Math.round(100*nQtd/Math.max(1,nEnq))}%</b><span>Quote rate</span></div>
+      <div class="${nOrd? '':'alert'}"><b>${Math.round(100*nOrd/Math.max(1,nEnq))}%</b><span>Win rate</span></div>
+    </div>
+    <h2>The funnel</h2>
+    ${fbar}
+    <p class="muted" style="margin:8px 4px 0">Win rate compares live purchase orders against enquiries logged this year. An order can land against an enquiry from an earlier year, so read it as a direction, not a ledger.</p>
+
+    <h2>Where attention is needed</h2>
+    <div class="card"><div class="row">
+      <div class="grow"><div class="t-title">${nEnq-nQtd} enquiries never quoted</div>
+        <div class="t-sub">Logged, then nothing sent. Each one is a customer who asked and got silence.</div></div>
+      <button class="a dark" onclick="ENQF='unquoted';go('enq')">Open</button>
+    </div></div>
+    <div class="card"><div class="row">
+      <div class="grow"><div class="t-title">${stale} quotations older than 30 days</div>
+        <div class="t-sub">Sent, no order, no follow-up recorded.</div></div>
+      <button class="a dark" onclick="QTNF='stale';go('qtn')">Open</button>
+    </div></div>
+
+    <h2>By division</h2>
+    <div class="card"><table><thead><tr><th>Division</th><th class="n">Enq</th><th class="n">Quoted</th>
+      ${isAdmin()?'<th class="n">Value</th>':''}<th class="n">Rate</th></tr></thead><tbody>
+      ${FUN.sort((a,b)=>b.enquiries-a.enquiries).map(f=>`<tr>
+        <td>${esc(f.division)}</td><td class="n">${f.enquiries}</td><td class="n">${f.enquiries_quoted}</td>
+        ${isAdmin()?`<td class="n">${cr(f.quoted_value)}</td>`:''}
+        <td class="n">${f.quote_rate_pct}%</td></tr>`).join('')}
+    </tbody></table></div>`;
+};
+
+// ================= ENQUIRIES =================
+function enqFilter(f){ ENQF=f; enqDraw(); }
+function enqCard(e){
+  const tag = e.quoted ? `<span class="tag ok">QUOTED</span>` : `<span class="tag late">NOT QUOTED</span>`;
+  const age = e.enq_date ? Math.round((new Date(today()) - new Date(e.enq_date))/864e5) : null;
+  return `<div class="card"><div class="row">
+    <div class="grow">
+      <div class="t-title">${esc(e.enq_no)}</div>
+      <div class="t-sub">${esc(e.customer||'—')}</div>
+      <div class="t-sub">${fmt(e.enq_date)} · ${e.lines} line${e.lines>1?'s':''} · ${esc(e.division||'—')}${age!=null?` · ${age}d old`:''}</div>
+      ${e.quoted?`<div class="t-sub" style="color:#334">▸ ${e.quotations} quotation${e.quotations>1?'s':''}${isAdmin()?` · ${cr(e.quoted_value)}`:''}${e.days_to_quote!=null?` · quoted in ${e.days_to_quote}d`:''}</div>`:''}
+    </div>
+    <div style="text-align:right">${tag}<div style="margin-top:6px"><span class="tag ${divClass(e.division)}">${esc(e.division||'')}</span></div></div>
+  </div></div>`;
+}
+function enqDraw(){
+  const term = ($('#eq')?.value||'').trim().toLowerCase();
+  const hit = e => !term || [e.enq_no,e.customer,e.division].some(v=>(v||'').toString().toLowerCase().includes(term));
+  const pass = e => ENQF==='all' ? true
+    : ENQF==='unquoted' ? !e.quoted
+    : ENQF==='quoted'   ? e.quoted
+    : ENQF==='rlw'      ? e.division==='Railway'
+    : ENQF==='oth'      ? e.division!=='Railway' : true;
+  ['all','unquoted','quoted','rlw','oth'].forEach(k=>$('#e-'+k)?.classList.remove('dark'));
+  $('#e-'+ENQF)?.classList.add('dark');
+  const list = ENQ.filter(e=>hit(e)&&pass(e));
+  $('#enqlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${ENQ.length}</p>`
+    + (list.length ? list.map(enqCard).join('') : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+render.enq = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!ENQ.length) ENQ = await q('v_enquiries', x=>x.order('enq_date',{ascending:false}));
+  $('#main').innerHTML = `
+    <input id="eq" placeholder="Search enquiry no, customer, division…" oninput="enqDraw()" style="margin:0 0 8px">
+    <div class="row" style="margin-bottom:4px">
+      <button class="a" id="e-all" onclick="enqFilter('all')">All</button>
+      <button class="a" id="e-unquoted" onclick="enqFilter('unquoted')">Not quoted</button>
+      <button class="a" id="e-quoted" onclick="enqFilter('quoted')">Quoted</button>
+      <button class="a" id="e-rlw" onclick="enqFilter('rlw')">Railway</button>
+      <button class="a" id="e-oth" onclick="enqFilter('oth')">Other</button>
+    </div>
+    <div id="enqlist"></div>`;
+  enqDraw();
+};
+
+// ================= QUOTATIONS =================
+function qtnFilter(f){ QTNF=f; qtnDraw(); }
+function qtnCard(x){
+  const stale = x.age_days>30;
+  return `<div class="card"><div class="row">
+    <div class="grow">
+      <div class="t-title">${esc(x.qtn_no)}</div>
+      <div class="t-sub">${esc(x.customer||'—')}</div>
+      <div class="t-sub">${fmt(x.qtn_date)} · ${x.lines} line${x.lines>1?'s':''} · ${x.age_days}d old</div>
+      <div class="t-sub" style="color:#334">▸ ${x.enq_linked?`against ${esc(x.enq_no)}`:`<span style="color:#a96b00">no enquiry on record${x.enq_no?` (ref ${esc(x.enq_no)})`:''}</span>`}</div>
+    </div>
+    <div style="text-align:right">
+      ${isAdmin()?`<div class="t-title">${cr(x.quotation_amount)}</div>`:''}
+      <div style="margin-top:6px">${stale?'<span class="tag soon">STALE</span>':'<span class="tag info">OPEN</span>'}</div>
+    </div>
+  </div></div>`;
+}
+function qtnDraw(){
+  const term = ($('#qq')?.value||'').trim().toLowerCase();
+  const hit = x => !term || [x.qtn_no,x.enq_no,x.customer,x.division].some(v=>(v||'').toString().toLowerCase().includes(term));
+  const pass = x => QTNF==='all' ? true
+    : QTNF==='stale'    ? x.age_days>30
+    : QTNF==='orphan'   ? !x.enq_linked
+    : QTNF==='big'      ? Number(x.quotation_amount)>=1e7 : true;
+  ['all','stale','orphan','big'].forEach(k=>$('#q-'+k)?.classList.remove('dark'));
+  $('#q-'+QTNF)?.classList.add('dark');
+  const list = QTN.filter(x=>hit(x)&&pass(x));
+  const val = list.reduce((a,b)=>a+Number(b.quotation_amount||0),0);
+  $('#qtnlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${QTN.length}${isAdmin()?` · ${cr(val)}`:''}</p>`
+    + (list.length ? list.map(qtnCard).join('') : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+render.qtn = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!QTN.length) QTN = await q('v_quotations', x=>x.order('qtn_date',{ascending:false}));
+  $('#main').innerHTML = `
+    <input id="qq" placeholder="Search quotation no, enquiry, customer…" oninput="qtnDraw()" style="margin:0 0 8px">
+    <div class="row" style="margin-bottom:4px">
+      <button class="a" id="q-all" onclick="qtnFilter('all')">All</button>
+      <button class="a" id="q-stale" onclick="qtnFilter('stale')">Stale 30d+</button>
+      <button class="a" id="q-orphan" onclick="qtnFilter('orphan')">No enquiry</button>
+      ${isAdmin()?`<button class="a" id="q-big" onclick="qtnFilter('big')">₹1cr+</button>`:''}
+    </div>
+    <div id="qtnlist"></div>`;
+  qtnDraw();
+};
+
+// ================= CUSTOMERS =================
+render.cus = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!CUS.length) CUS = await q('v_customer_scorecard');
+  const list = CUS.slice().sort((a,b)=> (Number(b.po_value)+Number(b.quoted_value)) - (Number(a.po_value)+Number(a.quoted_value)));
+  const both = list.filter(c=>c.enquiries>0 && c.pos>0).length;
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${list.length}</b><span>Customers seen</span></div>
+      <div><b>${list.filter(c=>c.enquiries>0).length}</b><span>Enquired</span></div>
+      <div><b>${both}</b><span>Enquired + ordered</span></div>
+    </div>
+    <p class="muted" style="margin:0 4px 8px">One row per customer name as written in the source sheets. Names are matched loosely — a customer spelled two ways will still appear twice until the master is cleaned.</p>
+    ${list.map(c=>`<div class="card"><div class="row">
+      <div class="grow">
+        <div class="t-title">${esc(c.customer||'—')}</div>
+        <div class="t-sub">${c.enquiries} enquir${c.enquiries===1?'y':'ies'} · ${c.enquiries_quoted} quoted · ${c.pos} PO${c.pos===1?'':'s'}</div>
+      </div>
+      ${isAdmin()?`<div style="text-align:right">
+        <div class="t-title">${cr(c.po_value)}</div>
+        <div class="t-sub">ordered</div>
+        <div class="t-sub">${cr(c.quoted_value)} quoted</div>
+      </div>`:''}
+    </div></div>`).join('')}`;
+};
+
+// ---- boot ----
+(async ()=>{
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ location.href = './index.html'; return; }
+  const {data,error} = await sb.rpc('my_profile');
+  if(error || !data?.length){ location.href = './index.html'; return; }
+  ME = data[0];
+  $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  drawNav(); render.funnel();
+})();
+</script>
+</body>
+</html>
