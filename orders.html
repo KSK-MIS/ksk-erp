@@ -70,7 +70,7 @@
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 const $ = s => document.querySelector(s);
-let ME = null, TAB = 'pending';
+let ME = null, TAB = 'pending', REG = [], REGF = 'all';
 const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
 const today = () => new Date().toISOString().slice(0,10);
@@ -89,6 +89,31 @@ function drawNav(){
 }
 function go(t){ TAB=t; drawNav(); render[t](); }
 
+// ---- register filter ----
+function regFilter(f){ REGF=f; regDraw(); }
+function regDraw(){
+  const term = ($('#rq')?.value || '').trim().toLowerCase();
+  const hit = p => !term || [p.customer,p.po_no,p.external_po_no,p.zone,p.consignee]
+      .some(v => (v||'').toString().toLowerCase().includes(term));
+  const pass = p => REGF==='all' ? true
+    : REGF==='open'    ? p.pending_lines>0
+    : REGF==='late'    ? p.overdue_lines>0
+    : REGF==='govt'    ? p.po_type==='GOVT'
+    : REGF==='pvt'     ? p.po_type==='PVT'
+    : REGF==='derived' ? derived(p) : true;
+  ['all','open','late','govt','pvt','der'].forEach(k=>{
+    const b=$('#f-'+k); if(b) b.classList.remove('dark');
+  });
+  const btn = $('#f-' + (REGF==='derived'?'der':REGF)); if(btn) btn.classList.add('dark');
+  const list = REG.filter(p=>hit(p)&&pass(p));
+  const g = list.filter(p=>p.po_type==='GOVT'), pv = list.filter(p=>p.po_type==='PVT');
+  $('#reglist').innerHTML =
+    `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${REG.length} POs</p>` +
+    (g.length?`<h2>Government (${g.length})</h2>`+g.map(poCard).join(''):'') +
+    (pv.length?`<h2>Private (${pv.length})</h2>`+pv.map(poCard).join(''):'') +
+    (list.length?'':'<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+
 // ---- cards ----
 function dpTag(dp, complete){
   if(complete) return '<span class="tag ok">COMPLETE</span>';
@@ -98,6 +123,7 @@ function dpTag(dp, complete){
   if(d <= 30) return `<span class="tag soon">DUE ${d}d</span>`;
   return `<span class="tag ok">${d}d left</span>`;
 }
+const derived = p => p.qty_basis === 'DISPATCH_DERIVED';
 function poCard(p){
   const worst = p.overdue_lines>0;
   return `<div class="card clickable" onclick="openPO('${p.id}')"><div class="row">
@@ -112,7 +138,9 @@ function poCard(p){
       <span style="font-size:11px;color:#889">${p.pending_lines}/${p.line_count} lines open</span>
     </div></div>
     <div class="row" style="margin-top:8px">
-      ${worst?`<span class="tag late">${p.overdue_lines} line${p.overdue_lines>1?'s':''} past DP</span>`:dpTag(p.dp_current, p.pending_lines==0)}
+      ${derived(p)
+        ? `<span class="tag" style="background:#fff4e5;color:#8a5a00">FY26-27 SALES RECORD — qty from dispatches, not a PO</span>`
+        : (worst?`<span class="tag late">${p.overdue_lines} line${p.overdue_lines>1?'s':''} past DP</span>`:dpTag(p.dp_current, p.pending_lines==0))}
       ${p.status!=='OPEN'?`<span class="tag info">${p.status}</span>`:''}
     </div></div>`;
 }
@@ -121,6 +149,7 @@ function lineRow(l, admin){
   return `<div class="card" style="box-shadow:none;border:1px solid #eef1f5;margin-bottom:8px">
     <div class="row"><div class="grow">
       <div class="t-title">${esc(l.item)}</div>
+      ${l.consignee?`<div class="t-sub" style="color:#334">▸ ${esc(l.consignee)}${l.schedule_sr?` <span class="muted">Sr ${esc(l.schedule_sr)}</span>`:''}</div>`:''}
       <div class="t-sub">${esc(l.drawing_no||'no drawing')} · ${num(l.qty_dispatched)} / ${num(l.qty_ordered)} ${esc(l.uom||'')}
         · bal <b>${num(l.balance)}</b><br>DP ${fmt(l.dp_current)}${l.dp_current!==l.dp_original?` <span class="muted">(orig ${fmt(l.dp_original)})</span>`:''}
         · invoice: ${esc(l.invoice_status||'PENDING')}</div>
@@ -160,6 +189,7 @@ const render = {
           <span class="tag ${p.po_type}">${p.po_type}</span></div>
           ${g[id].sort((a,b)=>(a.dp_current||'9')<(b.dp_current||'9')?-1:1).map(l=>`<div class="row" style="margin-top:8px">
             <div class="grow"><div class="t-sub" style="color:#233;font-size:13px">${esc(l.item)} <span class="muted">${esc(l.drawing_no||'')}</span></div>
+            ${l.consignee?`<div class="t-sub" style="color:#556">▸ ${esc(l.consignee)}${l.schedule_sr?` <span class="muted">Sr ${esc(l.schedule_sr)}</span>`:''}</div>`:''}
             <div class="t-sub">bal <b>${num(l.balance)}</b> ${esc(l.uom||'')} of ${num(l.qty_ordered)} · DP ${fmt(l.dp_current)}</div></div>
             ${dpTag(l.dp_current, false)}</div>`).join('')}
         </div>`;
@@ -240,11 +270,20 @@ const render = {
       ${isAdmin()?`<p class="muted" style="margin:10px 4px">LD exposure is an estimate: value of the undelivered balance × rate per week from the <b>original</b> DP, capped. Money is visible to Director &amp; Admin only — enforced in the database.</p>`:''}`;
   },
   async reg(){
-    const pos = await q('v_pos', x=>x.order('created_at',{ascending:false}));
-    const g = pos.filter(p=>p.po_type==='GOVT'), pv = pos.filter(p=>p.po_type==='PVT');
-    $('#main').innerHTML =
-      `<h2>Government (${g.length})</h2>` + (g.map(poCard).join('') || '<p class="muted">None yet.</p>') +
-      `<h2>Private (${pv.length})</h2>` + (pv.map(poCard).join('') || '<p class="muted">None yet.</p>');
+    REG = await q('v_pos', x=>x.order('created_at',{ascending:false}));
+    $('#main').innerHTML = `
+      <div class="card" style="padding:10px 12px">
+        <input id="rq" placeholder="Search customer, PO no., their PO no., zone…" oninput="regDraw()" style="margin:0">
+        <div class="row" style="margin-top:8px;flex-wrap:wrap">
+          <button class="a" id="f-all"  onclick="regFilter('all')">All</button>
+          <button class="a" id="f-open" onclick="regFilter('open')">Has open lines</button>
+          <button class="a" id="f-late" onclick="regFilter('late')">Past DP</button>
+          <button class="a" id="f-govt" onclick="regFilter('govt')">Govt</button>
+          <button class="a" id="f-pvt"  onclick="regFilter('pvt')">Private</button>
+          <button class="a" id="f-der"  onclick="regFilter('derived')">Sales records</button>
+        </div>
+      </div><div id="reglist"></div>`;
+    regDraw();
   },
   async new(){
     $('#main').innerHTML = `<div class="card">
@@ -313,6 +352,10 @@ async function openPO(id){
         <br>Inspection: ${esc(p.inspection_agency||'—')} · PO-level DP: ${fmt(p.dp_current)}
         ${p.remarks?'<br>'+esc(p.remarks):''}</div></div>
       <span class="tag ${p.po_type}">${p.po_type}</span></div>
+    ${derived(p)?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
+      <div class="t-title" style="color:#8a5a00">FY26-27 sales record — balances are not meaningful</div>
+      <div class="t-sub" style="color:#6b4700">The ordered quantity here was set <b>equal to what was dispatched this financial year</b>, because the PO document wasn't read (or doesn't exist). Balance shows zero <b>by construction</b> — that is not evidence the order is complete. Any delivery before 1 Apr 2026 is excluded by the FY rule and is invisible here. This PO has no DP, so it can never appear in the overdue or LD lens.</div>
+    </div>`:''}
     ${admin?`<div class="row" style="margin-top:10px">
       <button class="a" onclick="addLine('${p.id}')">+ Line</button>
       <button class="a" onclick="extendDP('${p.id}',null,'whole PO')">⟳ DP extension (whole PO)</button>
