@@ -1,0 +1,304 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Module 5: MASTERS (Parties & Items)
+     Tabs: Customers · Suppliers · Items · Coverage
+     Deploys on: GitHub Pages beside index.html. Upload whole, never edit.
+
+     Design note — two levels, on purpose:
+       GROUP  = the commercial relationship (NTPC, Indian Railways, L&T)
+       PARTY  = who the PO is actually with (NTPC Sipat, Western Railway)
+     Collapsing stations into one customer would destroy the order book —
+     each has its own PO, DP and consignee. Not grouping them would hide
+     how much NTPC business exists. So: both.
+
+     Nothing is renamed at source. The sheets keep their wording; the
+     alias table carries every spelling ever written to the right party.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Masters · KSK ERP</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { background:var(--bg); min-height:100vh; padding-bottom:70px; }
+  header { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
+  header a { color:var(--gold); text-decoration:none; font-size:20px; }
+  header h1 { font-size:16px; flex:1; } header h1 small { display:block; font-weight:400; opacity:.7; font-size:11px; }
+  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:3px 9px; font-size:11.5px; }
+  nav { display:flex; overflow-x:auto; background:#fff; border-bottom:1px solid #e2e7ee; position:sticky; top:53px; z-index:4; }
+  nav button { flex:1; min-width:86px; padding:11px 6px; border:0; background:none; font-size:12.5px; font-weight:600; color:#667; border-bottom:3px solid transparent; cursor:pointer; }
+  nav button.on { color:var(--navy); border-color:var(--gold); }
+  main { max-width:560px; margin:0 auto; padding:12px; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:14px; margin-bottom:10px; }
+  .card.clickable { cursor:pointer; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  .t-title { font-size:14.5px; font-weight:600; color:#182b45; }
+  .t-sub { font-size:12px; color:#778; margin-top:2px; line-height:1.45; }
+  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
+  .tag.GOVT_RAILWAY { background:#e2ecff; color:#1c4fa0; }
+  .tag.PSU { background:#e8f0ea; color:#2e6b3e; }
+  .tag.PRIVATE { background:#efe7f7; color:#5b3a86; }
+  .tag.both { background:#fff3d6; color:var(--warn); }
+  .tag.warn { background:#fff3d6; color:var(--warn); }
+  .tag.ok { background:#e6f4ea; color:var(--ok); }
+  button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
+  button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
+  input, select { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
+  h2 { font-size:13.5px; color:var(--navy); margin:14px 2px 8px; }
+  .muted { color:#778; font-size:12.5px; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .kpi div { background:#fff; border-radius:10px; padding:10px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
+  .kpi b { font-size:19px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
+  .kpi .warn b { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:#788; font-size:10.5px; padding:6px 4px; border-bottom:1px solid #eef; }
+  td { padding:8px 4px; border-bottom:1px solid #f2f4f8; }
+  td.n, th.n { text-align:right; }
+  .bar { height:7px; background:#eef1f5; border-radius:99px; overflow:hidden; margin-top:6px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  .bar i.part { background:var(--warn); }
+  .alias { display:inline-block; background:#f3f5f8; border:1px solid #e4e9f0; border-radius:6px;
+           padding:3px 7px; margin:3px 3px 0 0; font-size:11px; color:#556; }
+  .grp { border-left:3px solid var(--gold); }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
+  dialog { border:0; border-radius:14px; padding:18px; width:min(94vw,480px); max-height:88vh; }
+  dialog::backdrop { background:rgba(15,36,64,.5); }
+</style>
+</head>
+<body>
+<header>
+  <a href="./index.html">←</a>
+  <h1>Masters <small>Parties &amp; Items · KSK ERP 1.0</small></h1>
+  <div class="chip" id="who"></div>
+</header>
+<nav id="nav"></nav>
+<main id="main"><p class="muted" style="padding:30px;text-align:center">Loading…</p></main>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+
+<script>
+const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
+const $ = s => document.querySelector(s);
+let ME=null, TAB='cus', P=[], G=[], I=[], COV=[], IF='all';
+const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => (n==null||n==='') ? '—' : Number(n).toLocaleString('en-IN');
+function cr(n){ if(n==null) return '';
+  n=Number(n);
+  if(n>=1e7) return '₹'+(n/1e7).toFixed(2)+' cr';
+  if(n>=1e5) return '₹'+(n/1e5).toFixed(1)+' L';
+  return '₹'+n.toLocaleString('en-IN',{maximumFractionDigits:0});
+}
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
+async function q(v,mod){ let x=sb.from(v).select('*'); if(mod) x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
+const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
+const KIND = {GOVT_RAILWAY:'Railway',PSU:'PSU',PRIVATE:'Private'};
+
+const TABS=[['cus','Customers'],['sup','Suppliers'],['item','Items'],['cov','Coverage']];
+function drawNav(){ $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join(''); }
+function go(t){ TAB=t; drawNav(); render[t](); }
+const render={};
+
+// ---- party card + drill-in ----
+async function partyDlg(code){
+  const p = P.find(x=>x.code===code); if(!p) return;
+  const al = await q('v_party_aliases', x=>x.eq('party_id',p.id));
+  $('#dlg').innerHTML = `
+    <div class="row"><div class="grow">
+      <div class="t-title">${esc(p.name)}</div>
+      <div class="t-sub">${esc(p.code)}${p.site?' · '+esc(p.site):''}${p.group_name?' · part of '+esc(p.group_name):''}</div>
+    </div><span class="tag ${p.kind}">${KIND[p.kind]}</span></div>
+    ${p.is_customer&&p.is_supplier?`<div style="margin-top:8px"><span class="tag both">CUSTOMER AND SUPPLIER</span></div>`:''}
+    <table style="margin-top:12px">
+      ${p.is_customer?`<tr><td class="muted">Purchase orders</td><td class="n"><b>${p.pos}</b></td></tr>
+      <tr><td class="muted">Enquiries</td><td class="n">${p.enquiries}</td></tr>
+      <tr><td class="muted">Quotations</td><td class="n">${p.quotations}</td></tr>
+      ${isAdmin()&&p.po_value!=null?`<tr><td class="muted">Ordered</td><td class="n"><b>${cr(p.po_value)}</b></td></tr>`:''}`:''}
+      ${p.is_supplier?`<tr><td class="muted">Material receipts</td><td class="n"><b>${p.receipts}</b></td></tr>
+      ${isAdmin()&&p.purchase_value!=null?`<tr><td class="muted">Purchased</td><td class="n"><b>${cr(p.purchase_value)}</b></td></tr>`:''}`:''}
+    </table>
+    ${p.note?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
+      <div class="t-sub" style="color:#6b4700">${esc(p.note)}</div></div>`:''}
+    <h2>Written in the sheets as (${al.length})</h2>
+    <p class="muted" style="margin-bottom:4px">Every spelling below points here. Nothing was corrected at source.</p>
+    <div>${al.map(a=>`<span class="alias">${esc(a.alias)}<span style="color:#99a"> · ${esc(a.seen_as||'')}</span></span>`).join('')}</div>
+    <div class="row" style="margin-top:14px"><button class="a grow" onclick="dlg.close()">Close</button></div>`;
+  $('#dlg').showModal();
+}
+function partyCard(p){
+  const dup = p.aliases>1;
+  return `<div class="card clickable" onclick="partyDlg('${p.code}')"><div class="row">
+    <div class="grow">
+      <div class="t-title">${esc(p.name)}</div>
+      <div class="t-sub">${p.site?esc(p.site)+' · ':''}${p.is_customer?`${p.pos} PO${p.pos===1?'':'s'} · ${p.enquiries} enq`:''}${p.is_supplier?`${p.is_customer?' · ':''}${p.receipts} receipt${p.receipts===1?'':'s'}`:''}</div>
+      ${dup?`<div class="t-sub" style="color:#a96b00">▸ ${p.aliases} spellings merged</div>`:''}
+      ${p.is_customer&&p.is_supplier?`<div class="t-sub"><span class="tag both">BOTH</span></div>`:''}
+    </div>
+    <div style="text-align:right">
+      ${isAdmin()?`<div class="t-title">${cr(p.is_supplier&&!p.is_customer?p.purchase_value:p.po_value)}</div>`:''}
+      <div style="margin-top:4px"><span class="tag ${p.kind}">${KIND[p.kind]}</span></div>
+    </div></div></div>`;
+}
+
+// ================= CUSTOMERS =================
+render.cus = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!P.length) P = await q('v_parties');
+  if(!G.length) G = await q('v_party_groups');
+  const cus = P.filter(p=>p.is_customer);
+  const grouped = G.filter(g=>Number(g.pos)>0).sort((a,b)=>(Number(b.po_value)||0)-(Number(a.po_value)||0));
+  const ungrouped = cus.filter(p=>!p.group_code).sort((a,b)=>(Number(b.po_value)||0)-(Number(a.po_value)||0) || b.enquiries-a.enquiries);
+  const merged = cus.filter(p=>p.aliases>1).length;
+  const totalVal = cus.reduce((a,b)=>a+Number(b.po_value||0),0);
+
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${cus.length}</b><span>Customers</span></div>
+      <div><b>${G.length}</b><span>Groups</span></div>
+      <div class="${merged?'warn':''}"><b>${merged}</b><span>Had 2+ spellings</span></div>
+    </div>
+    <p class="muted" style="margin:0 4px 10px">A <b>group</b> is the relationship. A <b>party</b> is who the PO is with. NTPC Sipat and NTPC Korba are one relationship and two parties — separate POs, separate delivery periods. Both matter, so the master keeps both.</p>
+
+    <h2>By group</h2>
+    ${grouped.map(g=>{
+      const kids = cus.filter(p=>p.group_code===g.code && Number(p.pos)>0)
+                      .sort((a,b)=>(Number(b.po_value)||0)-(Number(a.po_value)||0));
+      const pct = totalVal ? Math.round(100*Number(g.po_value||0)/totalVal) : 0;
+      return `<div class="card grp">
+        <div class="row"><div class="grow">
+          <div class="t-title">${esc(g.name)}</div>
+          <div class="t-sub">${g.parties} part${g.parties===1?'y':'ies'} · ${g.pos} PO${Number(g.pos)===1?'':'s'}${isAdmin()&&totalVal?` · ${pct}% of the book`:''}</div>
+        </div>${isAdmin()?`<div class="t-title">${cr(g.po_value)}</div>`:''}</div>
+        ${isAdmin()&&totalVal?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}
+        <table style="margin-top:8px">${kids.map(p=>`<tr>
+          <td style="cursor:pointer" onclick="partyDlg('${p.code}')">${esc(p.site||p.name)}</td>
+          <td class="n">${p.pos} PO</td>
+          ${isAdmin()?`<td class="n">${cr(p.po_value)}</td>`:''}</tr>`).join('')}</table>
+        ${g.note?`<div class="t-sub" style="margin-top:8px;color:#667">${esc(g.note)}</div>`:''}
+      </div>`;
+    }).join('')}
+
+    <h2>Everyone else (${ungrouped.length})</h2>
+    <input id="cq" placeholder="Search customer…" oninput="cDraw()" style="margin:0 0 8px">
+    <div id="clist"></div>`;
+  window.cDraw = () => {
+    const t = ($('#cq').value||'').toLowerCase();
+    const l = ungrouped.filter(p=>!t || [p.name,p.code,p.site].some(v=>(v||'').toLowerCase().includes(t)));
+    $('#clist').innerHTML = l.length ? l.map(partyCard).join('') : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>';
+  };
+  cDraw();
+};
+
+// ================= SUPPLIERS =================
+render.sup = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!P.length) P = await q('v_parties');
+  const sup = P.filter(p=>p.is_supplier).sort((a,b)=>(Number(b.purchase_value)||0)-(Number(a.purchase_value)||0) || b.receipts-a.receipts);
+  const both = P.filter(p=>p.is_supplier&&p.is_customer);
+  const merged = sup.filter(p=>p.aliases>1).length;
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${sup.length}</b><span>Suppliers</span></div>
+      <div class="${both.length?'warn':''}"><b>${both.length}</b><span>Also customers</span></div>
+      <div class="${merged?'warn':''}"><b>${merged}</b><span>Had 2+ spellings</span></div>
+    </div>
+    ${both.length?`<div class="card" style="border-left:3px solid var(--warn)">
+      <div class="t-title">${both.length} firms sit on both sides of the trade</div>
+      <div class="t-sub">${both.map(p=>esc(p.name)).join(' · ')} — you sell to them and buy from them. Worth knowing before a negotiation.</div>
+    </div>`:''}
+    ${sup.map(partyCard).join('')}`;
+};
+
+// ================= ITEMS =================
+function iFilter(f){ IF=f; iDraw(); }
+function iDraw(){
+  const t = ($('#iq')?.value||'').toLowerCase();
+  const hit = i => !t || [i.code,i.name,i.group_name].some(v=>(v||'').toLowerCase().includes(t));
+  const pass = i => IF==='all' ? true
+    : IF==='open'   ? Number(i.qty_open)>0
+    : IF==='made'   ? Number(i.produced_mt)>0
+    : IF==='unnamed'? i.needs_naming : true;
+  ['all','open','made','unnamed'].forEach(k=>$('#i-'+k)?.classList.remove('dark'));
+  $('#i-'+IF)?.classList.add('dark');
+  const list = I.filter(i=>hit(i)&&pass(i))
+    .sort((a,b)=>Number(b.po_lines)+Number(b.enq_lines)-Number(a.po_lines)-Number(a.enq_lines));
+  $('#ilist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${I.length}</p>` +
+    (list.length ? list.map(i=>`<div class="card">
+      <div class="row"><div class="grow">
+        <div class="t-title">${esc(i.code)}${i.needs_naming?' <span class="tag warn">UNNAMED</span>':''}</div>
+        <div class="t-sub">${i.needs_naming?'<i>No description anywhere in the data</i>':esc(i.name.slice(0,110))}${!i.needs_naming&&i.name.length>110?'…':''}</div>
+        <div class="t-sub" style="color:#334">▸ ${esc(i.parent_group?i.parent_group+' › '+i.group_name:(i.group_name||'ungrouped'))}
+          · ${i.po_lines} PO line${Number(i.po_lines)===1?'':'s'} · ${i.enq_lines} enq</div>
+      </div>
+      <div style="text-align:right">
+        ${Number(i.qty_open)>0?`<div class="t-title">${num(i.qty_open)}</div><div class="t-sub">open</div>`:''}
+        ${Number(i.produced_mt)>0?`<div class="t-sub" style="color:#1e7e34">${Number(i.produced_mt).toFixed(0)} MT made</div>`:''}
+      </div></div></div>`).join('')
+    : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+render.item = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!I.length) I = await q('v_items');
+  const unnamed = I.filter(i=>i.needs_naming).length;
+  const open = I.filter(i=>Number(i.qty_open)>0).length;
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${I.length}</b><span>Items</span></div>
+      <div><b>${open}</b><span>With open qty</span></div>
+      <div class="${unnamed?'warn':''}"><b>${unnamed}</b><span>Unnamed</span></div>
+    </div>
+    <p class="muted" style="margin:0 4px 10px">Keyed on the <b>RDSO drawing number</b> — the one identifier every customer, every PO and the mill all agree on. Prose descriptions are not a key: there were 92 spellings on PO lines alone.</p>
+    ${unnamed?`<div class="card" style="border-left:3px solid var(--warn)">
+      <div class="t-title">${unnamed} drawings have no description anywhere</div>
+      <div class="t-sub">They appear only as enquiry line codes — <code>t-4153</code>, <code>t-8747</code> — with a category but no name. Nothing was invented to fill the gap. Name them as you quote them.</div>
+      <div style="margin-top:8px"><button class="a dark" onclick="iFilter('unnamed')">Show them</button></div>
+    </div>`:''}
+    <input id="iq" placeholder="Search drawing, name, group…" oninput="iDraw()" style="margin:0 0 8px">
+    <div class="row" style="margin-bottom:4px">
+      <button class="a" id="i-all" onclick="iFilter('all')">All</button>
+      <button class="a" id="i-open" onclick="iFilter('open')">Open qty</button>
+      <button class="a" id="i-made" onclick="iFilter('made')">We make it</button>
+      <button class="a" id="i-unnamed" onclick="iFilter('unnamed')">Unnamed</button>
+    </div>
+    <div id="ilist"></div>`;
+  iDraw();
+};
+
+// ================= COVERAGE =================
+render.cov = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!COV.length) COV = await q('v_master_coverage');
+  $('#main').innerHTML = `
+    <p class="muted" style="margin:0 4px 10px">A master nobody can join to is decoration. This is how much of the live data actually resolves through it.</p>
+    ${COV.map(c=>{
+      const pct = c.rows ? Math.round(100*c.resolved/c.rows) : 0;
+      return `<div class="card">
+        <div class="row"><div class="grow"><div class="t-title">${esc(c.scope)}</div>
+          <div class="t-sub">${c.resolved} of ${c.rows} resolved${c.rows-c.resolved?` · ${c.rows-c.resolved} not`:''}</div></div>
+          <div class="t-title" style="color:${pct===100?'var(--ok)':'var(--warn)'}">${pct}%</div></div>
+        <div class="bar"><i class="${pct===100?'':'part'}" style="width:${pct}%"></i></div>
+      </div>`;
+    }).join('')}
+    <div class="card" style="border-left:3px solid var(--navy)">
+      <div class="t-title">Why the item rows aren't 100%</div>
+      <div class="t-sub">Every party resolves. Items resolve only where the source carries a drawing number — the rest are prose like “plate screw” or “ml bars” with no drawing quoted. Those lines are left unmatched rather than guessed at, because matching “plate screw” to T-3914 rather than T-3915 or T-3916 would be a coin toss with your order book.</div>
+    </div>`;
+};
+
+// ---- boot ----
+(async ()=>{
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ location.href='./index.html'; return; }
+  const {data,error} = await sb.rpc('my_profile');
+  if(error || !data?.length){ location.href='./index.html'; return; }
+  ME = data[0];
+  $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  drawNav(); render.cus();
+})();
+</script>
+</body>
+</html>
