@@ -34,6 +34,7 @@
   .tag.late { background:#fdeaea; color:var(--bad); } .tag.ok { background:#e6f4ea; color:var(--ok); }
   .tag.soon { background:#fff3d6; color:var(--warn); } .tag.info { background:#e2ecff; color:#1c4fa0; }
   .tag.GOVT { background:#e2ecff; color:#1c4fa0; } .tag.PVT { background:#efe7f7; color:#5b3a86; }
+  .tag.closed { background:#fff4e5; color:#8a5a00; border:1px solid #ffd699; }
   button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
   button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
   input, select, textarea { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
@@ -146,20 +147,50 @@ function poCard(p){
 }
 function lineRow(l, admin){
   const pct = l.qty_ordered>0 ? Math.min(100, Math.round(100*l.qty_dispatched/l.qty_ordered)) : 0;
-  return `<div class="card" style="box-shadow:none;border:1px solid #eef1f5;margin-bottom:8px">
+  // A closed line still owes a balance on paper. Show it, and show why it's settled —
+  // a line that reads "72,612 owed" with no explanation is worse than one that's late.
+  return `<div class="card" style="box-shadow:none;border:1px solid ${l.closed?'#ffd699':'#eef1f5'};margin-bottom:8px;${l.closed?'background:#fffdf8':''}">
     <div class="row"><div class="grow">
       <div class="t-title">${esc(l.item)}</div>
       ${l.consignee?`<div class="t-sub" style="color:#334">▸ ${esc(l.consignee)}${l.schedule_sr?` <span class="muted">Sr ${esc(l.schedule_sr)}</span>`:''}</div>`:''}
       <div class="t-sub">${esc(l.drawing_no||'no drawing')} · ${num(l.qty_dispatched)} / ${num(l.qty_ordered)} ${esc(l.uom||'')}
         · bal <b>${num(l.balance)}</b><br>DP ${fmt(l.dp_current)}${l.dp_current!==l.dp_original?` <span class="muted">(orig ${fmt(l.dp_original)})</span>`:''}
         · invoice: ${esc(l.invoice_status||'PENDING')}</div>
-    </div>${dpTag(l.dp_current, l.complete)}</div>
-    <div class="bar"><i style="width:${pct}%"></i></div>
+    </div>${l.closed?'<span class="tag closed">CLOSED</span>':dpTag(l.dp_current, l.complete)}</div>
+    ${l.closed?`<div class="t-sub" style="color:#6b4700;background:#fff4e5;border:1px solid #ffd699;border-radius:8px;padding:8px;margin-top:8px">
+      <b>Settled without a dispatch record.</b> ${esc(l.closed_reason||'')}
+      ${l.closed_by_name?`<br><span class="muted">Closed by ${esc(l.closed_by_name)} · ${fmt(l.closed_on)}</span>`:''}</div>`
+    :`<div class="bar"><i style="width:${pct}%"></i></div>`}
     ${admin?`<div class="row" style="margin-top:9px">
-      <button class="a gold" onclick="addDispatch('${l.id}', ${l.balance})">+ Dispatch</button>
-      <button class="a" onclick="extendDP(null,'${l.id}','${esc(l.item)}')">⟳ DP extension</button>
-      <button class="a" onclick="invoiceSet('${l.id}')">Invoice…</button>
+      ${l.closed?`<button class="a" onclick="reopenLine('${l.id}')">Re-open</button>`
+      :`<button class="a gold" onclick="addDispatch('${l.id}', ${l.balance})">+ Dispatch</button>
+        <button class="a" onclick="extendDP(null,'${l.id}','${esc(l.item)}')">⟳ DP extension</button>
+        <button class="a" onclick="invoiceSet('${l.id}')">Invoice…</button>
+        ${!l.complete?`<button class="a" onclick="closeLine('${l.id}','${esc(l.item)}')">Close…</button>`:''}`}
     </div>`:''}</div>`;
+}
+// Closing is not deleting. It records that the line is settled and why, keeps the
+// balance visible, and can be undone.
+function closeLine(lineId, name){
+  $('#dlg').innerHTML = `<div class="t-title">Close this line without a dispatch</div>
+    <p class="muted" style="margin-top:3px">${esc(name)}</p>
+    <p class="muted" style="margin-top:6px">Use this when the material went out but the proof sits outside what this system holds — a delivery before 1 Apr 2026, for instance. The balance stays on the line; the reason goes on the record.</p>
+    <label>Why is this settled?</label>
+    <textarea id="c-why" rows="3" placeholder="e.g. Delivered Dec 2025; DP predates the FY window."></textarea>
+    <label>Settled on</label><input id="c-on" type="date" value="${today()}">
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="c-ok">Close line</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#c-ok').onclick = async ()=>{
+    if(!$('#c-why').value.trim()) return toast('A closure needs a reason');
+    await rpc('line_close', { p_line_id:lineId, p_reason:$('#c-why').value.trim(), p_on:$('#c-on').value||null });
+    toast('Line closed'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+async function reopenLine(lineId){
+  if(!confirm('Re-open this line? It goes back into the pending and LD lens.')) return;
+  await rpc('line_reopen', { p_line_id:lineId });
+  toast('Re-opened'); $('#dlg').close(); render[TAB]();
 }
 
 // ---- tabs ----

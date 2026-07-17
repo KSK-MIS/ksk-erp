@@ -261,6 +261,10 @@ async function loadBrief(){
   if(rc.no_po > 0)
     alerts.push(alertRow('amb', `${rc.no_po} deliveries taken in with no written PO`,
       'Recorded as "Verbal". The company owes for this material on someone\'s word.', './production.html'));
+  const cl = b.closed_lines || {};
+  if(cl.count > 0)
+    alerts.push(alertRow('amb', `${cl.count} lines settled without a dispatch record`,
+      `${Number(cl.qty).toLocaleString('en-IN')} units closed on someone's word rather than on evidence. Defensible, but not proof if the railway asks.`, './orders.html'));
   if((b.me?.tasks_overdue||0) > 0)
     alerts.push(alertRow('red', `${b.me.tasks_overdue} of your own tasks are overdue`,
       'Your name is on these.', './kartavya.html'));
