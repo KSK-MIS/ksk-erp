@@ -119,8 +119,8 @@
     <div class="tiles" style="margin-bottom:14px">
       <a class="tile" href="./orders.html" style="text-decoration:none"><b>Orders</b><span>Pending register · DP · dispatch · LD</span><i class="dot" id="d-ord" style="display:none"></i></a>
       <a class="tile" href="./sales.html" style="text-decoration:none"><b>Sales</b><span>Enquiry → Quotation → Order</span><i class="dot" id="d-sal" style="display:none"></i></a>
+      <a class="tile" href="./production.html" style="text-decoration:none"><b>Production</b><span>Mill output · Material receipts</span><i class="dot" id="d-prd" style="display:none"></i></a>
       <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Kartavya</b><span>My tasks · Delegation · Capture</span><i class="dot" id="d-kar" style="display:none"></i></a>
-      <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Checklists</b><span>Recurring duties &amp; scoreboard</span></a>
     </div>
 
     <div class="card" id="admin-card" style="display:none">
@@ -206,9 +206,11 @@ async function loadBrief(){
   if(error){ $('brief').innerHTML = `<div class="card"><p class="muted">Brief unavailable: ${esc(error.message)}</p></div>`; return; }
   const mon = b.orders.book_value != null;   // the DB decided, not this file
   const o = b.orders, ld = b.ld || {}, up = b.unprotected, s = b.sales;
+  const pr = b.production || {}, rc = b.receipts || {};
 
   dot('d-ord', o.pos_overdue);
   dot('d-sal', s.not_quoted);
+  dot('d-prd', pr.needs_review||0);
   dot('d-kar', (b.me?.tasks_overdue)||0);
 
   // ---- hero: the one number that matters ----
@@ -252,6 +254,12 @@ async function loadBrief(){
   if(o.pos_linked === 0 && o.pos_live > 0)
     alerts.push(alertRow('amb', 'No order is tagged to the quotation that won it',
       `${o.pos_live} live POs, none linked. Until they are, this system cannot tell you a win rate — and will not invent one.`, './sales.html'));
+  if(pr.utilisation_pct != null && pr.utilisation_pct < 70)
+    alerts.push(alertRow('red', `The mill ran ${pr.utilisation_pct}% of available days`,
+      `${pr.lay_off_days} lay-off days out of ${pr.days}. Not one of them records a reason — the sheet never asked for one.`, './production.html'));
+  if(rc.no_po > 0)
+    alerts.push(alertRow('amb', `${rc.no_po} deliveries taken in with no written PO`,
+      'Recorded as "Verbal". The company owes for this material on someone\'s word.', './production.html'));
   if((b.me?.tasks_overdue||0) > 0)
     alerts.push(alertRow('red', `${b.me.tasks_overdue} of your own tasks are overdue`,
       'Your name is on these.', './kartavya.html'));
@@ -263,6 +271,11 @@ async function loadBrief(){
       <div class="${o.lines_overdue?'alert':''}"><b>${o.lines_overdue}</b><span>Lines past DP</span></div>
       <div class="${up.lines?'alert':''}"><b>${up.lines}</b><span>Unprotected</span></div>
       <div><b>${b.dispatch_30d.count}</b><span>Dispatches 30d</span></div>
+    </div>
+    <div class="kpi">
+      <div><b>${Number(pr.mt_30d||0).toFixed(0)}</b><span>MT rolled 30d</span></div>
+      <div class="${(pr.utilisation_pct??100)<70?'alert':''}"><b>${pr.utilisation_pct ?? '—'}%</b><span>Mill utilisation</span></div>
+      <div><b>${rc.count_30d ?? 0}</b><span>Receipts 30d</span></div>
     </div>
     <h3>Needs a decision</h3>
     <div class="card">${alerts.join('')}</div>`;

@@ -1,0 +1,336 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Module 4: PRODUCTION (Mill output & material receipts)
+     Tabs: Daily · Products · Receipts · Suppliers
+     Deploys on: GitHub Pages beside index.html. Upload whole, never edit.
+
+     Deliberate design note: production is NOT linked to a PO line.
+     The Factory Report records one product per day with no order
+     reference, so line-level attribution would be invented. The link
+     to orders is by drawing number only, and is presented as such.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production · KSK ERP</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { background:var(--bg); min-height:100vh; padding-bottom:70px; }
+  header { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
+  header a { color:var(--gold); text-decoration:none; font-size:20px; }
+  header h1 { font-size:16px; flex:1; } header h1 small { display:block; font-weight:400; opacity:.7; font-size:11px; }
+  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:3px 9px; font-size:11.5px; }
+  nav { display:flex; overflow-x:auto; background:#fff; border-bottom:1px solid #e2e7ee; position:sticky; top:53px; z-index:4; }
+  nav button { flex:1; min-width:86px; padding:11px 6px; border:0; background:none; font-size:12.5px; font-weight:600; color:#667; border-bottom:3px solid transparent; cursor:pointer; }
+  nav button.on { color:var(--navy); border-color:var(--gold); }
+  main { max-width:560px; margin:0 auto; padding:12px; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:14px; margin-bottom:10px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  .t-title { font-size:14.5px; font-weight:600; color:#182b45; }
+  .t-sub { font-size:12px; color:#778; margin-top:2px; line-height:1.45; }
+  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
+  .tag.PRODUCTION { background:#e6f4ea; color:var(--ok); }
+  .tag.LAY_OFF { background:#fdeaea; color:var(--bad); }
+  .tag.WEEKLY_OFF { background:#eef1f5; color:#667; }
+  .tag.NO_PRODUCTION { background:#fff3d6; color:var(--warn); }
+  .tag.UNKNOWN { background:#fff3d6; color:var(--warn); }
+  .tag.review { background:#fff3d6; color:var(--warn); }
+  button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
+  button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
+  input, select, textarea { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
+  label { font-size:11.5px; color:#556; display:block; margin-top:8px; }
+  h2 { font-size:13.5px; color:var(--navy); margin:14px 2px 8px; }
+  .muted { color:#778; font-size:12.5px; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .kpi div { background:#fff; border-radius:10px; padding:10px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
+  .kpi b { font-size:19px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
+  .kpi .alert b { color:var(--bad); } .kpi .warn b { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:#788; font-size:10.5px; padding:6px 4px; border-bottom:1px solid #eef; }
+  td { padding:8px 4px; border-bottom:1px solid #f2f4f8; }
+  td.n, th.n { text-align:right; }
+  /* day strip */
+  .strip { display:flex; flex-wrap:wrap; gap:3px; margin:8px 0 4px; }
+  .dot { width:14px; height:14px; border-radius:3px; cursor:pointer; }
+  .dot.PRODUCTION { background:#2e7d43; } .dot.LAY_OFF { background:#d9534f; }
+  .dot.WEEKLY_OFF { background:#dfe4ea; } .dot.NO_PRODUCTION { background:#e8a33d; }
+  .dot.UNKNOWN { background:#e8a33d; }
+  .legend { display:flex; gap:12px; font-size:10.5px; color:#778; margin-top:6px; flex-wrap:wrap; }
+  .legend i { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:4px; }
+  .mrow { display:flex; align-items:center; gap:8px; padding:9px 0; border-bottom:1px solid #f2f4f8; }
+  .mrow:last-child { border-bottom:0; }
+  .mbar { flex:1; height:8px; background:#eef1f5; border-radius:99px; overflow:hidden; }
+  .mbar i { display:block; height:100%; background:var(--ok); }
+  .mbar i.zero { background:var(--bad); }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
+  dialog { border:0; border-radius:14px; padding:18px; width:min(94vw,480px); max-height:88vh; }
+  dialog::backdrop { background:rgba(15,36,64,.5); }
+</style>
+</head>
+<body>
+<header>
+  <a href="./index.html">←</a>
+  <h1>Production <small>Mill output &amp; material receipts · KSK ERP 1.0</small></h1>
+  <div class="chip" id="who"></div>
+</header>
+<nav id="nav"></nav>
+<main id="main"><p class="muted" style="padding:30px;text-align:center">Loading…</p></main>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+
+<script>
+const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
+const $ = s => document.querySelector(s);
+let ME=null, TAB='daily', DAYS=[], PRODS=[], MONTHS=[], RECV=[], SUPP=[], DF='all', RF='all';
+const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
+const fmtM = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}) : '—';
+const num = n => (n==null||n==='') ? '—' : Number(n).toLocaleString('en-IN');
+const mt = n => (n==null) ? '—' : Number(n).toLocaleString('en-IN',{maximumFractionDigits:3}) + ' MT';
+function cr(n){ if(n==null) return '';
+  n=Number(n);
+  if(n>=1e7) return '₹'+(n/1e7).toFixed(2)+' cr';
+  if(n>=1e5) return '₹'+(n/1e5).toFixed(1)+' L';
+  return '₹'+n.toLocaleString('en-IN',{maximumFractionDigits:0});
+}
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
+async function rpc(fn,args){ const {data,error}=await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
+async function q(v,mod){ let x=sb.from(v).select('*'); if(mod) x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
+const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
+const LABEL = {PRODUCTION:'Production',LAY_OFF:'Lay off',WEEKLY_OFF:'Weekly off',NO_PRODUCTION:'No production',UNKNOWN:'Not recorded'};
+
+const TABS=[['daily','Daily'],['prod','Products'],['recv','Receipts'],['sup','Suppliers']];
+function drawNav(){ $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join(''); }
+function go(t){ TAB=t; drawNav(); render[t](); }
+const render={};
+
+// ================= DAILY =================
+function dayDlg(d){
+  const x = DAYS.find(v=>v.prod_date===d); if(!x) return;
+  $('#dlg').innerHTML = `
+    <div class="row"><div class="grow"><div class="t-title">${fmt(x.prod_date)}</div>
+      <div class="t-sub">${LABEL[x.status]}${x.product_name?' · '+esc(x.product_name):''}</div></div>
+      <span class="tag ${x.status}">${LABEL[x.status]}</span></div>
+    <table style="margin-top:12px">
+      <tr><td class="muted">Output</td><td class="n"><b>${x.status==='PRODUCTION'?mt(x.qty_mt):'—'}</b></td></tr>
+      ${x.drawing_no?`<tr><td class="muted">Drawing</td><td class="n">${esc(x.drawing_no)}</td></tr>`:''}
+      <tr><td class="muted">Campaign to date</td><td class="n">${mt(x.cum_campaign_mt)}</td></tr>
+      <tr><td class="muted">Year to date</td><td class="n">${mt(x.cum_fy_mt)}</td></tr>
+      ${x.reason?`<tr><td class="muted">Reason</td><td class="n">${esc(x.reason)}</td></tr>`:''}
+      <tr><td class="muted">As written in sheet</td><td class="n">${esc(x.product_raw||'—')}</td></tr>
+    </table>
+    ${x.note?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
+      <div class="t-sub" style="color:#6b4700">${esc(x.note)}</div></div>`:''}
+    <div class="row" style="margin-top:12px">
+      ${isAdmin()?`<button class="a gold grow" onclick="editDay('${x.prod_date}')">Correct this day</button>`:''}
+      <button class="a" onclick="dlg.close()">Close</button></div>`;
+  $('#dlg').showModal();
+}
+function editDay(d){
+  const x = DAYS.find(v=>v.prod_date===d) || {};
+  $('#dlg').close();
+  $('#dlg').innerHTML = `<div class="t-title">Restate ${fmt(d)}</div>
+    <p class="muted" style="margin-top:3px">Whatever you put here replaces the day. The original wording from the sheet is kept either way.</p>
+    <label>What happened</label>
+    <select id="p-st" onchange="document.getElementById('p-qty').disabled = this.value!=='PRODUCTION'">
+      ${Object.entries(LABEL).map(([k,v])=>`<option value="${k}" ${x.status===k?'selected':''}>${v}</option>`).join('')}
+    </select>
+    <label>Product</label><input id="p-name" value="${esc(x.product_name||'')}" placeholder="e.g. Fish Plate Bar T-5916">
+    <label>Drawing no.</label><input id="p-drg" value="${esc(x.drawing_no||'')}" placeholder="e.g. T-5916">
+    <label>Output (MT)</label><input id="p-qty" type="number" step="0.001" value="${x.qty_mt??''}" ${x.status!=='PRODUCTION'?'disabled':''}>
+    <label>Reason (if the mill was down)</label><input id="p-rsn" value="${esc(x.reason||'')}" placeholder="Why? The sheet never says.">
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="p-ok">Save</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#p-ok').onclick = async ()=>{
+    const st=$('#p-st').value;
+    await rpc('production_day_set', { p_date:d, p_status:st,
+      p_product_code:null, p_product_name:$('#p-name').value||null, p_drawing:$('#p-drg').value||null,
+      p_qty: st==='PRODUCTION' ? Number($('#p-qty').value) : null,
+      p_reason:$('#p-rsn').value||null, p_note:null });
+    toast('Day restated'); $('#dlg').close(); DAYS=[]; MONTHS=[]; PRODS=[]; render.daily();
+  };
+  $('#dlg').showModal();
+}
+function dFilter(f){ DF=f; dDraw(); }
+function dDraw(){
+  const pass = d => DF==='all' ? true
+    : DF==='prod'   ? d.status==='PRODUCTION'
+    : DF==='off'    ? d.status==='LAY_OFF'
+    : DF==='review' ? d.needs_review : true;
+  ['all','prod','off','review'].forEach(k=>$('#d-'+k)?.classList.remove('dark'));
+  $('#d-'+DF)?.classList.add('dark');
+  const list = DAYS.filter(pass).slice().sort((a,b)=>b.prod_date.localeCompare(a.prod_date));
+  $('#dlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${DAYS.length} days</p>` +
+    (list.length ? list.map(d=>`<div class="card" style="padding:11px 14px;cursor:pointer" onclick="dayDlg('${d.prod_date}')">
+      <div class="row">
+        <div class="grow"><div class="t-title">${fmt(d.prod_date)}${d.needs_review?' <span class="tag review">CHECK</span>':''}</div>
+          <div class="t-sub">${d.status==='PRODUCTION' ? esc(d.product_name||'—') : LABEL[d.status]}</div></div>
+        <div style="text-align:right">
+          <div class="t-title">${d.status==='PRODUCTION'?mt(d.qty_mt):'—'}</div>
+          <span class="tag ${d.status}">${LABEL[d.status]}</span></div>
+      </div></div>`).join('')
+    : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+render.daily = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!DAYS.length)   DAYS   = await q('v_production', x=>x.order('prod_date'));
+  if(!MONTHS.length) MONTHS = await q('v_production_months', x=>x.order('month'));
+  const prodDays = DAYS.filter(d=>d.status==='PRODUCTION').length;
+  const layoff   = DAYS.filter(d=>d.status==='LAY_OFF').length;
+  const total    = DAYS.reduce((a,b)=>a+Number(b.qty_mt||0),0);
+  const working  = DAYS.filter(d=>d.status!=='WEEKLY_OFF').length;
+  const util     = Math.round(100*prodDays/Math.max(1,working));
+  const maxMt    = Math.max(...MONTHS.map(m=>Number(m.total_mt||0)), 1);
+  const review   = DAYS.filter(d=>d.needs_review).length;
+
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${total.toLocaleString('en-IN',{maximumFractionDigits:0})}</b><span>MT this year</span></div>
+      <div class="${util<70?'alert':''}"><b>${util}%</b><span>Mill utilisation</span></div>
+      <div class="${layoff?'alert':''}"><b>${layoff}</b><span>Lay-off days</span></div>
+    </div>
+
+    <h2>Every day since 1 April</h2>
+    <div class="card">
+      <div class="strip">${DAYS.map(d=>`<i class="dot ${d.status}" title="${fmt(d.prod_date)} · ${LABEL[d.status]}${d.status==='PRODUCTION'?' · '+mt(d.qty_mt):''}" onclick="dayDlg('${d.prod_date}')"></i>`).join('')}</div>
+      <div class="legend">
+        <span><i style="background:#2e7d43"></i>Production</span>
+        <span><i style="background:#d9534f"></i>Lay off</span>
+        <span><i style="background:#dfe4ea"></i>Weekly off</span>
+        <span><i style="background:#e8a33d"></i>Other / not recorded</span>
+      </div>
+      <p class="muted" style="margin-top:8px">${prodDays} production days, ${layoff} lay-off days out of ${DAYS.length}. Utilisation counts working days only — a weekly off is rest, a lay-off is loss.</p>
+    </div>
+
+    <h2>By month</h2>
+    <div class="card">
+      ${MONTHS.map(m=>`<div class="mrow">
+        <div style="width:78px;font-size:12px;color:#445">${fmtM(m.month).split(' ')[0]}</div>
+        <div class="mbar"><i class="${Number(m.total_mt)?'':'zero'}" style="width:${Math.max(2,100*Number(m.total_mt||0)/maxMt)}%"></i></div>
+        <div style="width:64px;text-align:right;font-size:12px;font-weight:600;color:#182b45">${Number(m.total_mt).toFixed(0)} MT</div>
+        <div style="width:44px;text-align:right;font-size:11px;color:${Number(m.utilisation_pct)<70?'#b02a37':'#778'}">${m.utilisation_pct}%</div>
+      </div>`).join('')}
+    </div>
+    ${MONTHS.some(m=>Number(m.total_mt)===0)?`<div class="card" style="border-left:3px solid var(--bad)">
+      <div class="t-title">${MONTHS.filter(m=>Number(m.total_mt)===0).map(m=>fmtM(m.month)).join(', ')}: nothing was rolled</div>
+      <div class="t-sub">The mill did not run at all. The sheet records the lay-off but never says why — no reason is captured anywhere in the source. Open any day and add one; it is the single most useful thing missing from this data.</div>
+    </div>`:''}
+    ${review?`<div class="card" style="border-left:3px solid var(--warn)">
+      <div class="t-title">${review} days need checking</div>
+      <div class="t-sub">Figures that don't add up in the source, or a blank cell. Nothing was guessed — open them and say what's right.</div>
+      <div style="margin-top:8px"><button class="a dark" onclick="dFilter('review')">Show them</button></div>
+    </div>`:''}
+
+    <h2>Day by day</h2>
+    <div class="row" style="margin-bottom:4px">
+      <button class="a" id="d-all" onclick="dFilter('all')">All</button>
+      <button class="a" id="d-prod" onclick="dFilter('prod')">Production</button>
+      <button class="a" id="d-off" onclick="dFilter('off')">Lay off</button>
+      <button class="a" id="d-review" onclick="dFilter('review')">Needs check</button>
+    </div>
+    <div id="dlist"></div>`;
+  dDraw();
+};
+
+// ================= PRODUCTS =================
+render.prod = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!PRODS.length) PRODS = await q('v_production_by_product');
+  const list = PRODS.slice().sort((a,b)=>Number(b.total_mt)-Number(a.total_mt));
+  const max = Math.max(...list.map(p=>Number(p.total_mt)),1);
+  $('#main').innerHTML = `
+    <p class="muted" style="margin:0 4px 10px">The mill runs one product at a time, in campaigns. These are the campaigns since 1 April, biggest first.</p>
+    ${list.map(p=>`<div class="card">
+      <div class="row"><div class="grow">
+        <div class="t-title">${esc(p.product_name)}</div>
+        <div class="t-sub">${p.days} day${p.days>1?'s':''} · ${fmt(p.first_day)} → ${fmt(p.last_day)} · avg ${Number(p.avg_day_mt).toFixed(1)} MT/day</div>
+        ${p.drawing_no?`<div class="t-sub" style="color:#334">▸ Drawing ${esc(p.drawing_no)}</div>`:'<div class="t-sub" style="color:#a96b00">▸ No drawing number in the sheet</div>'}
+      </div><div style="text-align:right"><div class="t-title">${Number(p.total_mt).toFixed(1)} MT</div></div></div>
+      <div class="mbar" style="margin-top:8px"><i style="width:${100*Number(p.total_mt)/max}%"></i></div>
+    </div>`).join('')}`;
+};
+
+// ================= RECEIPTS =================
+function rFilter(f){ RF=f; rDraw(); }
+function rDraw(){
+  const term = ($('#rq')?.value||'').trim().toLowerCase();
+  const hit = r => !term || [r.supplier,r.material,r.order_ref].some(v=>(v||'').toString().toLowerCase().includes(term));
+  const pass = r => RF==='all' ? true
+    : RF==='nopo' ? r.no_written_po
+    : RF==='mt'   ? r.uom==='MT' : true;
+  ['all','nopo','mt'].forEach(k=>$('#r-'+k)?.classList.remove('dark'));
+  $('#r-'+RF)?.classList.add('dark');
+  const list = RECV.filter(r=>hit(r)&&pass(r));
+  $('#rlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${RECV.length}</p>` +
+    (list.length ? list.map(r=>`<div class="card">
+      <div class="row"><div class="grow">
+        <div class="t-title">${esc(r.material||'—')}</div>
+        <div class="t-sub">${esc(r.supplier||'—')}</div>
+        <div class="t-sub">${fmt(r.recv_date)} · ${num(r.qty)} ${esc(r.uom||'')}${r.consignee&&r.consignee!=='KSK'?' · to '+esc(r.consignee):''}</div>
+        <div class="t-sub" style="color:${r.no_written_po?'#a96b00':'#334'}">▸ ${r.no_written_po?`no written PO — “${esc(r.order_ref||'')}”`:esc(r.order_ref||'—')}</div>
+      </div>
+      ${isAdmin()?`<div style="text-align:right">
+        <div class="t-title">${r.value!=null?cr(r.value):'—'}</div>
+        <div class="t-sub">${r.rate!=null?'@ '+cr(r.rate):esc(r.rate_raw||'')}</div></div>`:''}
+      </div></div>`).join('')
+    : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+}
+render.recv = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!RECV.length) RECV = await q('v_receipts', x=>x.order('recv_date',{ascending:false}));
+  const nopo = RECV.filter(r=>r.no_written_po).length;
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${RECV.length}</b><span>Receipts</span></div>
+      <div class="${nopo?'warn':''}"><b>${nopo}</b><span>No written PO</span></div>
+      <div><b>${new Set(RECV.map(r=>r.supplier)).size}</b><span>Suppliers</span></div>
+    </div>
+    ${nopo?`<div class="card" style="border-left:3px solid var(--warn)">
+      <div class="t-title">${nopo} receipts came in against no written purchase order</div>
+      <div class="t-sub">The sheet records them as “Verbal”, naming the person who authorised. Material was taken in, and the company owes for it, on someone's word. That may be exactly how you want to run — but it should be a decision, not an accident.</div>
+      <div style="margin-top:8px"><button class="a dark" onclick="rFilter('nopo')">Show them</button></div>
+    </div>`:''}
+    <input id="rq" placeholder="Search material, supplier, order ref…" oninput="rDraw()" style="margin:0 0 8px">
+    <div class="row" style="margin-bottom:4px">
+      <button class="a" id="r-all" onclick="rFilter('all')">All</button>
+      <button class="a" id="r-nopo" onclick="rFilter('nopo')">No written PO</button>
+      <button class="a" id="r-mt" onclick="rFilter('mt')">Tonnage</button>
+    </div>
+    <div id="rlist"></div>`;
+  rDraw();
+};
+
+// ================= SUPPLIERS =================
+render.sup = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!SUPP.length) SUPP = await q('v_receipts_by_supplier');
+  const list = SUPP.slice().sort((a,b)=>(Number(b.value)||0)-(Number(a.value)||0) || b.receipts-a.receipts);
+  $('#main').innerHTML = `
+    <p class="muted" style="margin:0 4px 10px">One row per supplier name as written in the Factory Report. Names are not yet mastered — the same supplier spelled two ways appears twice.</p>
+    ${list.map(s=>`<div class="card"><div class="row">
+      <div class="grow"><div class="t-title">${esc(s.supplier||'—')}</div>
+        <div class="t-sub">${s.receipts} receipt${s.receipts>1?'s':''} · ${fmt(s.first_recv)} → ${fmt(s.last_recv)}</div>
+        ${s.without_po?`<div class="t-sub" style="color:#a96b00">▸ ${s.without_po} without a written PO</div>`:''}
+      </div>
+      ${isAdmin()&&s.value!=null?`<div style="text-align:right"><div class="t-title">${cr(s.value)}</div></div>`:''}
+    </div></div>`).join('')}`;
+};
+
+// ---- boot ----
+(async ()=>{
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ location.href='./index.html'; return; }
+  const {data,error} = await sb.rpc('my_profile');
+  if(error || !data?.length){ location.href='./index.html'; return; }
+  ME = data[0];
+  $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  drawNav(); render.daily();
+})();
+</script>
+</body>
+</html>
