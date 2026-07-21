@@ -1,330 +1,534 @@
 <!doctype html>
 <!-- ============================================================
-     KSK ERP 1.0 — Portal, Director Brief & Phase 0 Admin (index.html)
-     Deploys on: GitHub Pages (upload this whole file, never edit)
-     Backend: Supabase project ksk-erp (Mumbai)
-     The anon key below is PUBLIC BY DESIGN — every row is guarded
-     by Row-Level Security inside the database, not by this file.
-     The brief is one RPC: director_brief(). Money keys come back
-     null for Staff — the gate is in Postgres, not here.
+     KSK ERP 1.0 — Dashboard (index.html)
+     Deploys on: GitHub Pages. Upload this whole file, never edit in place.
+
+     DESIGN NOTES — read before changing anything:
+     • Audience is Office/Excel/Tally users. So: Segoe UI, a command bar
+       with TEXT-labelled buttons (not icons), bordered data grids with
+       shaded header rows and banded rows, right-aligned figures in Indian
+       digit grouping, and a real Print + Export to Excel.
+     • PRESENTATION MODE hides every internal-risk figure (LD, overdue,
+       receivables, utilisation, lay-off) and shows only credentials.
+       The client-safe figures come from company_profile() — a separate
+       database function. The decision about what a customer may see is
+       made in Postgres, not by hiding a <div>.
+     • The anon key below is PUBLIC BY DESIGN — RLS is the guard.
      ============================================================ -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KSK ERP 1.0</title>
+<title>KSK ERP — Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
-  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  body { background:var(--bg); min-height:100vh; }
-  header { background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
-  header .logo { background:var(--gold); color:var(--navy); font-weight:800; border-radius:8px; padding:4px 8px; }
-  header h1 { font-size:17px; font-weight:600; flex:1; }
-  header small { display:block; font-weight:400; opacity:.75; font-size:11px; }
-  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); color:#fff; border-radius:999px; padding:4px 10px; font-size:12px; }
-  main { max-width:560px; margin:0 auto; padding:16px; }
-  .card { background:#fff; border-radius:14px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:18px; margin-bottom:14px; }
-  h2 { font-size:15px; color:var(--navy); margin-bottom:10px; }
-  h3 { font-size:12.5px; color:#667; margin:18px 2px 8px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
-  label { display:block; font-size:12px; color:#555; margin:10px 0 4px; }
-  input, select { width:100%; padding:12px; border:1px solid #cfd6e0; border-radius:10px; font-size:15px; background:#fff; }
-  button { width:100%; padding:13px; margin-top:14px; border:0; border-radius:10px; background:var(--navy); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
-  button.gold { background:var(--gold); color:var(--navy); }
-  button.ghost { background:#e8ecf2; color:var(--navy); }
-  button.sm { width:auto; padding:8px 12px; margin:0; font-size:12.5px; border-radius:8px; }
-  .muted { color:#667; font-size:12.5px; line-height:1.5; }
-  .msg { margin-top:12px; padding:10px 12px; border-radius:8px; font-size:13.5px; display:none; }
-  .msg.ok  { display:block; background:#e6f4ea; color:var(--ok); }
-  .msg.err { display:block; background:#fdeaea; color:var(--bad); }
-  .user-row { display:flex; align-items:center; gap:10px; padding:12px 2px; border-bottom:1px solid #eef1f5; }
-  .user-row:last-child { border-bottom:0; }
-  .avatar { width:38px; height:38px; border-radius:50%; background:var(--navy2); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
-  .user-info { flex:1; min-width:0; }
-  .user-info b { display:block; font-size:14px; color:#182b45; }
-  .user-info span { font-size:12px; color:#778; word-break:break-all; }
-  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; }
-  .tag.DIRECTOR { background:#fff3d6; color:#8a6d00; }
-  .tag.ADMIN { background:#e2ecff; color:#1c4fa0; }
-  .tag.STAFF { background:#e8f0ea; color:#2e6b3e; }
-  .tag.off { background:#f1d5d8; color:var(--bad); }
-  .tiles { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .tile { background:#fff; border-radius:14px; padding:16px 14px; box-shadow:0 1px 4px rgba(15,36,64,.08); position:relative; }
-  .tile b { color:var(--navy); font-size:14px; display:block; margin-bottom:4px; }
-  .tile span { font-size:11.5px; color:#889; }
-  .tile.soon { opacity:.55; }
-  .tile .dot { position:absolute; top:12px; right:12px; background:var(--bad); color:#fff; font-size:10.5px; font-weight:700;
-               min-width:19px; height:19px; border-radius:99px; display:flex; align-items:center; justify-content:center; padding:0 5px; }
-  /* brief */
-  .hero { background:var(--navy); color:#fff; border-radius:14px; padding:16px; margin-bottom:14px; }
-  .hero .as { font-size:11px; opacity:.6; }
-  .hero .big { font-size:27px; font-weight:700; margin:6px 0 2px; }
-  .hero .sub { font-size:12.5px; opacity:.8; line-height:1.5; }
-  .hero .split { display:flex; gap:14px; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,.15); }
-  .hero .split div { flex:1; }
-  .hero .split b { display:block; font-size:16px; }
-  .hero .split span { font-size:10.5px; opacity:.65; }
-  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
-  .kpi div { background:#fff; border-radius:12px; padding:12px 8px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
-  .kpi b { font-size:20px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
-  .kpi .alert b { color:var(--bad); } .kpi .warn b { color:var(--warn); }
-  .alert-row { display:flex; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid #f2f4f8; }
-  .alert-row:last-child { border-bottom:0; }
-  .alert-row .ic { width:8px; height:8px; border-radius:99px; margin-top:6px; flex-shrink:0; }
-  .alert-row .ic.red { background:var(--bad); } .alert-row .ic.amb { background:var(--warn); } .alert-row .ic.grn { background:var(--ok); }
-  .alert-row .tx { flex:1; } .alert-row .tx b { font-size:13.5px; color:#182b45; display:block; }
-  .alert-row .tx span { font-size:12px; color:#778; line-height:1.45; }
-  #screen-app, #screen-login, #screen-denied { display:none; }
+  :root{
+    --navy:#12395f; --navy-d:#0d2a47; --gold:#c9a227;
+    --ink:#1a1a1a; --ink-2:#444; --ink-3:#6b7280;
+    --line:#d0d7de; --line-2:#e8ebef; --head:#f1f4f8; --bg:#eef1f5;
+    --ok:#15803d; --ok-bg:#e8f5ec; --bad:#b42318; --bad-bg:#fdecea;
+    --warn:#a15c07; --warn-bg:#fdf3e3; --info:#175cd3; --info-bg:#e8f1fd;
+    --excel:#1d6f42;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+
+  /* ---------- Title bar ---------- */
+  .titlebar{background:var(--navy);color:#fff;padding:10px 18px;display:flex;align-items:center;gap:14px}
+  .titlebar .logo{background:var(--gold);color:var(--navy-d);font-weight:800;font-size:15px;letter-spacing:.5px;padding:6px 10px;border-radius:3px}
+  .titlebar .co{flex:1;min-width:0}
+  .titlebar .co b{display:block;font-size:16px;font-weight:600;letter-spacing:.2px}
+  .titlebar .co span{display:block;font-size:11.5px;opacity:.8}
+  .titlebar .usr{font-size:12.5px;text-align:right;white-space:nowrap}
+  .titlebar .usr b{display:block;font-weight:600}
+  .titlebar .usr span{opacity:.8;font-size:11.5px}
+
+  /* ---------- Command bar (ribbon) ---------- */
+  .cmdbar{background:#fff;border-bottom:1px solid var(--line);padding:7px 14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  .cmd{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:6px 12px;font-size:13px;font-family:inherit;color:var(--ink);cursor:pointer;white-space:nowrap}
+  .cmd:hover{background:var(--head);border-color:#9aa5b1}
+  .cmd:active{background:#e3e8ee}
+  .cmd.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .cmd.primary:hover{background:var(--navy-d)}
+  .cmd.excel{color:var(--excel);border-color:#a8cbb6;font-weight:600}
+  .cmd.excel:hover{background:#eaf5ef}
+  .cmd.on{background:var(--gold);border-color:#a8871f;color:#3d2f00;font-weight:600}
+  .cmd .k{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:2px;padding:0 4px;margin-left:2px}
+  .cmd.on .k{color:#5a4700;border-color:#a8871f}
+  .sep{width:1px;height:24px;background:var(--line);margin:0 5px}
+  .asof{margin-left:auto;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+  .asof b{color:var(--ink)}
+
+  /* ---------- Layout ---------- */
+  main{max-width:1180px;margin:0 auto;padding:16px}
+  .banner{background:var(--warn-bg);border:1px solid #e8c98a;border-left:4px solid var(--gold);border-radius:3px;padding:9px 14px;margin-bottom:14px;font-size:13px;color:#6b4700;display:none}
+  .banner.show{display:block}
+  h2.sec{font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.7px;margin:20px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--navy)}
+  h2.sec:first-of-type{margin-top:4px}
+
+  /* ---------- KPI strip ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px}
+  .kpi{background:#fff;border:1px solid var(--line);border-top:3px solid var(--navy);border-radius:3px;padding:12px 14px}
+  .kpi.red{border-top-color:var(--bad)} .kpi.amber{border-top-color:var(--warn)} .kpi.green{border-top-color:var(--ok)}
+  .kpi .lbl{font-size:11.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+  .kpi .val{font-size:25px;font-weight:600;color:var(--navy);margin:3px 0 1px;letter-spacing:-.4px}
+  .kpi.red .val{color:var(--bad)} .kpi.amber .val{color:var(--warn)} .kpi.green .val{color:var(--ok)}
+  .kpi .sub{font-size:12px;color:var(--ink-3)}
+
+  /* ---------- Data grid (Excel-like) ---------- */
+  .panel{background:#fff;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+  .panel .phead{background:var(--head);border-bottom:1px solid var(--line);padding:9px 14px;font-size:13px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:8px}
+  .panel .phead .note{margin-left:auto;font-weight:400;font-size:12px;color:var(--ink-3)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  thead th{background:var(--head);color:var(--ink-2);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line-2);white-space:nowrap}
+  thead th:last-child{border-right:0}
+  tbody td{padding:8px 12px;border-bottom:1px solid var(--line-2);border-right:1px solid var(--line-2);vertical-align:middle}
+  tbody td:last-child{border-right:0}
+  tbody tr:nth-child(even){background:#fafbfc}
+  tbody tr:hover{background:#eef4fb}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td.neg{color:var(--bad)}
+  tr.total td{background:var(--head)!important;font-weight:700;border-top:2px solid var(--navy)}
+  .rowlbl{font-weight:600;color:var(--ink)}
+  .rowsub{display:block;font-size:12px;color:var(--ink-3);font-weight:400;margin-top:1px}
+
+  /* ---------- Badges ---------- */
+  .badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:3px;white-space:nowrap;border:1px solid}
+  .badge.red{background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
+  .badge.amber{background:var(--warn-bg);color:var(--warn);border-color:#e8c98a}
+  .badge.green{background:var(--ok-bg);color:var(--ok);border-color:#a8d5b8}
+  .badge.blue{background:var(--info-bg);color:var(--info);border-color:#aecbf5}
+
+  .btn-sm{border:1px solid var(--line);background:#fff;border-radius:3px;padding:4px 10px;font-size:12.5px;font-family:inherit;cursor:pointer;color:var(--navy);white-space:nowrap;text-decoration:none;display:inline-block}
+  .btn-sm:hover{background:var(--head);border-color:#9aa5b1}
+
+  /* ---------- Module launcher ---------- */
+  .mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:10px}
+  .mod{background:#fff;border:1px solid var(--line);border-radius:3px;padding:13px 15px;text-decoration:none;color:inherit;display:block;position:relative}
+  .mod:hover{border-color:var(--navy);box-shadow:0 1px 4px rgba(18,57,95,.13)}
+  .mod b{display:block;font-size:14.5px;color:var(--navy);font-weight:600;margin-bottom:2px}
+  .mod span{font-size:12.5px;color:var(--ink-3);display:block;line-height:1.4}
+  .mod .cnt{position:absolute;top:11px;right:12px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;min-width:19px;height:19px;border-radius:10px;display:none;align-items:center;justify-content:center;padding:0 6px}
+
+  /* ---------- Login / admin ---------- */
+  .card{background:#fff;border:1px solid var(--line);border-radius:3px;padding:20px;max-width:430px;margin:36px auto}
+  .card h3{font-size:16px;color:var(--navy);margin-bottom:6px}
+  label{display:block;font-size:12.5px;color:var(--ink-2);font-weight:600;margin:12px 0 4px}
+  input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-size:14px;font-family:inherit;background:#fff}
+  input:focus,select:focus{outline:2px solid #a8c7f0;outline-offset:-1px;border-color:var(--info)}
+  .btn{width:100%;padding:9px;margin-top:14px;border:1px solid var(--navy);border-radius:3px;background:var(--navy);color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
+  .btn:hover{background:var(--navy-d)}
+  .btn.ghost{background:#fff;color:var(--navy)}
+  .btn.ghost:hover{background:var(--head)}
+  .msg{margin-top:11px;padding:9px 11px;border-radius:3px;font-size:13px;display:none;border:1px solid}
+  .msg.ok{display:block;background:var(--ok-bg);color:var(--ok);border-color:#a8d5b8}
+  .msg.err{display:block;background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
+  .muted{color:var(--ink-3);font-size:12.5px;line-height:1.5}
+  #screen-app,#screen-login,#screen-denied{display:none}
+  footer{text-align:center;font-size:11.5px;color:var(--ink-3);padding:22px 14px 30px}
+
+  /* ---------- Print ---------- */
+  @media print{
+    body{background:#fff;font-size:11pt}
+    .cmdbar,.mods,#admin-card,.noprint,footer .np{display:none!important}
+    .titlebar{background:#fff!important;color:#000!important;border-bottom:2.5pt solid #12395f;padding:0 0 8pt}
+    .titlebar .logo{background:#fff;color:#000;border:1.5pt solid #12395f}
+    .titlebar .usr{display:none}
+    main{max-width:100%;padding:0}
+    .panel,.kpi{break-inside:avoid;box-shadow:none}
+    h2.sec{break-after:avoid}
+    a[href]:after{content:""}
+    @page{margin:14mm;size:A4}
+  }
 </style>
 </head>
 <body>
 
-<header>
+<div class="titlebar">
   <div class="logo">KSK</div>
-  <h1>KSK ERP 1.0 <small>My ERP. My Control.</small></h1>
-  <div class="chip" id="who" style="display:none"></div>
-</header>
+  <div class="co">
+    <b>KSK Engineering Industries Pvt. Ltd.</b>
+    <span id="subtitle">Management Dashboard</span>
+  </div>
+  <div class="usr" id="usr"></div>
+</div>
 
-<main>
+<!-- ============ LOGIN ============ -->
+<section id="screen-login">
+  <div class="card">
+    <h3>Sign in</h3>
+    <p class="muted">Use your company Google account. If Google sign-in is unavailable, request an email link below.</p>
+    <button class="btn" id="btn-google" style="margin-top:14px">Sign in with Google</button>
+    <label for="email">Email address (fallback)</label>
+    <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email">
+    <button class="btn ghost" id="btn-login">Send sign-in link</button>
+    <div class="msg" id="login-msg"></div>
+  </div>
+</section>
 
-  <!-- ============ LOGIN ============ -->
-  <section id="screen-login">
-    <div class="card">
-      <h2>Sign in</h2>
-      <p class="muted">Enter your company email. You'll receive a sign-in link — open it on this device.</p>
-      <button class="gold" id="btn-google" style="margin-top:4px">Sign in with Google</button>
-      <p class="muted" style="margin-top:14px">Use your <b>@kskenggind.com</b> Google account. If Google sign-in is unavailable, use the email link below.</p>
-      <label>Email (fallback)</label>
-      <input id="email" type="email" placeholder="you@kskenggind.com" autocomplete="email">
-      <button class="ghost" id="btn-login">Send sign-in link</button>
-      <div class="msg" id="login-msg"></div>
-    </div>
-  </section>
+<section id="screen-denied">
+  <div class="card">
+    <h3>Access not enabled</h3>
+    <p class="muted">You are signed in, but this account has not been granted access to KSK ERP. Please contact the Director.</p>
+    <button class="btn ghost" onclick="signOut()">Sign out</button>
+  </div>
+</section>
 
-  <!-- ============ NOT PROVISIONED ============ -->
-  <section id="screen-denied">
-    <div class="card">
-      <h2>Private system</h2>
-      <p class="muted">You are signed in, but this account has not been given access to KSK ERP. Please contact the Director.</p>
-      <button class="ghost" onclick="signOut()">Sign out</button>
-    </div>
-  </section>
+<!-- ============ DASHBOARD ============ -->
+<section id="screen-app">
+  <div class="cmdbar noprint">
+    <button class="cmd primary" onclick="refresh()" title="Reload all figures from the database">&#8635; Refresh</button>
+    <button class="cmd" onclick="window.print()" title="Print or save as PDF (Ctrl+P)">&#128424; Print<span class="k">Ctrl+P</span></button>
+    <button class="cmd excel" onclick="exportExcel()" title="Download these figures as a spreadsheet">&#8681; Export to Excel</button>
+    <div class="sep"></div>
+    <button class="cmd" id="pm-btn" onclick="togglePM()" title="Hide all internal figures so the screen is safe to show a customer">&#128100; Presentation Mode</button>
+    <div class="sep"></div>
+    <button class="cmd" onclick="signOut()">Sign out</button>
+    <div class="asof">As on <b id="asof">—</b></div>
+  </div>
 
-  <!-- ============ PORTAL ============ -->
-  <section id="screen-app">
-
-    <div id="brief"><p class="muted" style="padding:20px;text-align:center">Reading the business…</p></div>
-
-    <h3>Modules</h3>
-    <div class="tiles" style="margin-bottom:14px">
-      <a class="tile" href="./orders.html" style="text-decoration:none"><b>Orders</b><span>Pending register · DP · dispatch · LD</span><i class="dot" id="d-ord" style="display:none"></i></a>
-      <a class="tile" href="./sales.html" style="text-decoration:none"><b>Sales</b><span>Enquiry → Quotation → Order</span><i class="dot" id="d-sal" style="display:none"></i></a>
-      <a class="tile" href="./production.html" style="text-decoration:none"><b>Production</b><span>Mill output · Material receipts</span><i class="dot" id="d-prd" style="display:none"></i></a>
-      <a class="tile" href="./kartavya.html" style="text-decoration:none"><b>Kartavya</b><span>My tasks · Delegation · Capture</span><i class="dot" id="d-kar" style="display:none"></i></a>
-      <a class="tile" href="./masters.html" style="text-decoration:none"><b>Masters</b><span>Customers · Suppliers · Items</span></a>
-    </div>
-
-    <div class="card" id="admin-card" style="display:none">
-      <h2>Users &amp; Access</h2>
-      <div id="user-list" class="muted">Loading…</div>
-      <hr style="border:0;border-top:1px solid #eef1f5;margin:14px 0">
-      <h2>Add / update a user</h2>
-      <label>Email</label>
-      <input id="u-email" type="email" placeholder="name@kskenggind.com">
-      <label>Full name</label>
-      <input id="u-name" type="text" placeholder="Full name">
-      <label>Role</label>
-      <select id="u-role">
-        <option value="STAFF">Staff — own tasks, own capture, own score</option>
-        <option value="ADMIN">Admin — sees all tasks, manages day-to-day</option>
-        <option value="DIRECTOR">Director — full control</option>
-      </select>
-      <label>Status</label>
-      <select id="u-active">
-        <option value="true">Active</option>
-        <option value="false">Deactivated (never deleted — Law 3)</option>
-      </select>
-      <button class="gold" id="btn-save">Save user</button>
-      <div class="msg" id="admin-msg"></div>
+  <main>
+    <div class="banner" id="pm-banner">
+      <b>Presentation Mode is ON.</b> Liquidated damages, overdue deliveries, receivables, mill utilisation and internal tasks are hidden. This screen is safe to show a customer. Press the button again to return to the full view.
     </div>
 
-    <div class="card">
-      <button class="ghost" onclick="signOut()">Sign out</button>
-    </div>
-  </section>
+    <div id="body"><p class="muted" style="padding:40px;text-align:center">Loading figures…</p></div>
 
-</main>
+    <!-- Admin -->
+    <div id="admin-card" style="display:none">
+      <h2 class="sec">Users &amp; Access</h2>
+      <div class="panel">
+        <div class="phead">Registered users<span class="note">Deactivate rather than delete — history is never removed</span></div>
+        <div id="user-list" style="padding:12px 14px" class="muted">Loading…</div>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <div class="phead">Add or update a user</div>
+        <div style="padding:14px;max-width:430px">
+          <label for="u-email">Email address</label>
+          <input id="u-email" type="email" placeholder="name@kskenggind.com">
+          <label for="u-name">Full name</label>
+          <input id="u-name" type="text" placeholder="Full name">
+          <label for="u-role">Role</label>
+          <select id="u-role">
+            <option value="STAFF">Staff — own tasks and entries only</option>
+            <option value="ADMIN">Admin — sees all tasks, manages day-to-day</option>
+            <option value="DIRECTOR">Director — full control, sees all values</option>
+          </select>
+          <label for="u-active">Status</label>
+          <select id="u-active">
+            <option value="true">Active</option>
+            <option value="false">Deactivated</option>
+          </select>
+          <button class="btn" id="btn-save">Save user</button>
+          <div class="msg" id="admin-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      KSK ERP 1.0 &middot; figures drawn live from the company database
+      <span class="np">&middot; <span id="foot-role"></span></span>
+    </footer>
+  </main>
+</section>
 
 <script>
-const SUPABASE_URL = "https://xpacvqbmpvcwhcimieaq.supabase.co";
-const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c";
-// ^ public by design — RLS inside Postgres is the guard, not this file.
+const SUPABASE_URL="https://xpacvqbmpvcwhcimieaq.supabase.co";
+const ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c";
+const sb=supabase.createClient(SUPABASE_URL,ANON_KEY);
+const $=id=>document.getElementById(id);
+let ME=null, B=null, CP=null, PM=false;
 
-const sb = supabase.createClient(SUPABASE_URL, ANON_KEY);
-const $ = id => document.getElementById(id);
-let ME = null;
-
-const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function cr(n){ if(n==null) return '';
-  n = Number(n);
-  if(n >= 1e7) return '₹' + (n/1e7).toFixed(2) + ' cr';
-  if(n >= 1e5) return '₹' + (n/1e5).toFixed(1) + ' L';
-  return '₹' + n.toLocaleString('en-IN',{maximumFractionDigits:0});
+const esc=t=>(t??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const n0=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+// Indian money. Tally users read crore/lakh, so that is what we print.
+function money(v){
+  if(v==null) return '—';
+  v=Number(v);
+  const s=v<0?'-':''; v=Math.abs(v);
+  if(v>=1e7) return s+'₹'+(v/1e7).toFixed(2)+' cr';
+  if(v>=1e5) return s+'₹'+(v/1e5).toFixed(2)+' lakh';
+  return s+'₹'+v.toLocaleString('en-IN',{maximumFractionDigits:0});
 }
-const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}) : '';
-function show(id){ ['screen-login','screen-denied','screen-app'].forEach(s => $(s).style.display = s===id ? 'block':'none'); }
-function msg(id, text, cls){ const m=$(id); m.textContent=text; m.className='msg '+cls; }
+const dl=d=>d?new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
+function msg(id,t,c){const m=$(id);m.textContent=t;m.className='msg '+c;}
 
-$('btn-google').onclick = async () => {
-  const { error } = await sb.auth.signInWithOAuth({ provider: 'google',
-    options: { redirectTo: location.origin + location.pathname } });
-  if(error) msg('login-msg', error.message, 'err');
+// ---------- auth ----------
+$('btn-google').onclick=async()=>{
+  const{error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
+  if(error) msg('login-msg',error.message,'err');
 };
-
-$('btn-login').onclick = async () => {
-  const email = $('email').value.trim().toLowerCase();
-  if(!email){ msg('login-msg','Please enter your email.','err'); return; }
-  const { error } = await sb.auth.signInWithOtp({ email,
-    options: { emailRedirectTo: location.origin + location.pathname } });
-  if(error) msg('login-msg', error.message, 'err');
-  else msg('login-msg','Link sent. Open it promptly on this device, in this browser.','ok');
+$('btn-login').onclick=async()=>{
+  const email=$('email').value.trim().toLowerCase();
+  if(!email){msg('login-msg','Please enter your email address.','err');return;}
+  const{error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+  error?msg('login-msg',error.message,'err'):msg('login-msg','Link sent. Open it on this device, in this browser.','ok');
 };
+async function signOut(){await sb.auth.signOut();location.reload();}
+function show(id){['screen-login','screen-denied','screen-app'].forEach(s=>$(s).style.display=s===id?'block':'none');}
 
-async function signOut(){ await sb.auth.signOut(); location.reload(); }
-
-// ================= THE BRIEF =================
-function dot(id, n){ const e=$(id); if(!e) return;
-  if(n>0){ e.textContent = n>99?'99+':n; e.style.display='flex'; } else e.style.display='none'; }
-
-function alertRow(colour, title, sub, href){
-  return `<div class="alert-row"><i class="ic ${colour}"></i><div class="tx">
-    <b>${title}</b><span>${sub}</span></div>
-    ${href?`<a href="${href}"><button class="ghost sm">Open</button></a>`:''}</div>`;
+// ---------- presentation mode ----------
+function togglePM(){
+  PM=!PM;
+  $('pm-btn').classList.toggle('on',PM);
+  $('pm-banner').classList.toggle('show',PM);
+  $('subtitle').textContent=PM?'Company Profile':'Management Dashboard';
+  $('admin-card').style.display=(!PM&&ME&&(ME.role==='DIRECTOR'||ME.role==='ADMIN'))?'block':'none';
+  draw();
 }
 
-async function loadBrief(){
-  const { data:b, error } = await sb.rpc('director_brief');
-  if(error){ $('brief').innerHTML = `<div class="card"><p class="muted">Brief unavailable: ${esc(error.message)}</p></div>`; return; }
-  const mon = b.orders.book_value != null;   // the DB decided, not this file
-  const o = b.orders, ld = b.ld || {}, up = b.unprotected, s = b.sales;
-  const pr = b.production || {}, rc = b.receipts || {};
+// ---------- render ----------
+function kpi(cls,label,val,sub){
+  return `<div class="kpi ${cls}"><div class="lbl">${label}</div><div class="val">${val}</div><div class="sub">${sub||''}</div></div>`;
+}
+function row(label,sub,value,cls,badge,action){
+  return `<tr><td><span class="rowlbl">${label}</span>${sub?`<span class="rowsub">${sub}</span>`:''}</td>
+    <td class="num ${cls||''}">${value}</td>
+    <td>${badge||''}</td>
+    <td class="noprint" style="text-align:right">${action||''}</td></tr>`;
+}
 
-  dot('d-ord', o.pos_overdue);
-  dot('d-sal', s.not_quoted);
-  dot('d-prd', pr.needs_review||0);
-  dot('d-kar', (b.me?.tasks_overdue)||0);
+function draw(){ PM?drawProfile():drawInternal(); }
 
-  // ---- hero: the one number that matters ----
-  const hero = mon
-    ? `<div class="hero">
-        <div class="as">Order book as of ${fmt(b.as_of)}</div>
-        <div class="big">${cr(o.open_value)}</div>
-        <div class="sub">still to ship, across ${o.lines_open} open lines in ${o.pos_open} purchase orders.<br>
-        Total booked this year: ${cr(o.book_value)} over ${o.pos_live} POs.</div>
-        <div class="split">
-          <div><b>${cr(ld.amount||0)}</b><span>LD exposure, ${ld.lines_exposed||0} lines</span></div>
-          <div><b>${cr(s.quoted_value)}</b><span>quoted, ${s.quoted} of ${s.enquiries} enquiries</span></div>
-        </div>
-      </div>`
-    : `<div class="hero">
-        <div class="as">As of ${fmt(b.as_of)}</div>
-        <div class="big">${o.lines_open} lines open</div>
-        <div class="sub">across ${o.pos_open} purchase orders. ${o.lines_overdue} are past their delivery period.</div>
-      </div>`;
-
-  // ---- what needs a decision ----
-  const alerts = [];
-  if(o.pos_overdue > 0)
-    alerts.push(alertRow('red', `${o.lines_overdue} lines past DP in ${o.pos_overdue} POs`,
-      'Delivery period has passed and stock has not gone out.', './orders.html'));
-  if(up.lines > 0)
-    alerts.push(alertRow('red', `${up.lines} overdue lines with no extension applied for`,
-      `The oldest is ${up.worst_days} days late. Every week without a granted extension is LD the railway can levy.`, './orders.html'));
-  if(mon && ld.amount > 0)
-    alerts.push(alertRow('amb', `${cr(ld.amount)} of LD exposure is live`,
-      `Worst single PO: ${esc(ld.worst?.po_no||'')} — ${cr(ld.worst?.amount)}. ${esc((ld.worst?.customer||'').slice(0,60))}`, './orders.html'));
-  if(b.ext_pending > 0)
-    alerts.push(alertRow('amb', `${b.ext_pending} extension applications awaiting a reply`,
-      'Applied for, not yet granted. The DP has not moved.', './orders.html'));
-  if(s.not_quoted > 0)
-    alerts.push(alertRow('amb', `${s.not_quoted} enquiries never quoted`,
-      'A customer asked and got silence.', './sales.html'));
-  if(b.qtn_stale > 0)
-    alerts.push(alertRow('amb', `${b.qtn_stale} quotations older than 30 days`,
-      'Sent, no order, no follow-up on record.', './sales.html'));
-  if(o.pos_linked === 0 && o.pos_live > 0)
-    alerts.push(alertRow('amb', 'No order is tagged to the quotation that won it',
-      `${o.pos_live} live POs, none linked. Until they are, this system cannot tell you a win rate — and will not invent one.`, './sales.html'));
-  if(pr.utilisation_pct != null && pr.utilisation_pct < 70)
-    alerts.push(alertRow('red', `The mill ran ${pr.utilisation_pct}% of available days`,
-      `${pr.lay_off_days} lay-off days out of ${pr.days}. Not one of them records a reason — the sheet never asked for one.`, './production.html'));
-  if(rc.no_po > 0)
-    alerts.push(alertRow('amb', `${rc.no_po} deliveries taken in with no written PO`,
-      'Recorded as "Verbal". The company owes for this material on someone\'s word.', './production.html'));
-  const cl = b.closed_lines || {};
-  if(cl.count > 0)
-    alerts.push(alertRow('amb', `${cl.count} lines settled without a dispatch record`,
-      `${Number(cl.qty).toLocaleString('en-IN')} units closed on someone's word rather than on evidence. Defensible, but not proof if the railway asks.`, './orders.html'));
-  if((b.me?.tasks_overdue||0) > 0)
-    alerts.push(alertRow('red', `${b.me.tasks_overdue} of your own tasks are overdue`,
-      'Your name is on these.', './kartavya.html'));
-  if(!alerts.length)
-    alerts.push(alertRow('grn', 'Nothing is on fire', 'No overdue lines, no unprotected exposure, no silent enquiries.'));
-
-  $('brief').innerHTML = hero + `
-    <div class="kpi">
-      <div class="${o.lines_overdue?'alert':''}"><b>${o.lines_overdue}</b><span>Lines past DP</span></div>
-      <div class="${up.lines?'alert':''}"><b>${up.lines}</b><span>Unprotected</span></div>
-      <div><b>${b.dispatch_30d.count}</b><span>Dispatches 30d</span></div>
+// ---------- CLIENT-SAFE VIEW ----------
+function drawProfile(){
+  const c=CP; if(!c){$('body').innerHTML='<p class="muted">Profile unavailable.</p>';return;}
+  const ob=c.order_book,cu=c.customers,it=c.items,pr=c.production,dv=c.delivery;
+  const insp=(c.inspection||[]).filter(Boolean);
+  $('body').innerHTML=`
+    <h2 class="sec">Company at a glance</h2>
+    <div class="kpis">
+      ${kpi('','Current order book',money(ob.value),ob.pos+' live purchase orders')}
+      ${kpi('','Customers served',n0(cu.total),cu.railway_zones+' railway zones · '+cu.ntpc_stations+' NTPC stations')}
+      ${kpi('','Approved drawings',n0(it.drawings),'RDSO drawing numbers supplied')}
+      ${kpi('','Production, this year',n0(pr.mt_fy)+' MT',dl(pr.from_date)+' to '+dl(pr.to_date))}
     </div>
-    <div class="kpi">
-      <div><b>${Number(pr.mt_30d||0).toFixed(0)}</b><span>MT rolled 30d</span></div>
-      <div class="${(pr.utilisation_pct??100)<70?'alert':''}"><b>${pr.utilisation_pct ?? '—'}%</b><span>Mill utilisation</span></div>
-      <div><b>${rc.count_30d ?? 0}</b><span>Receipts 30d</span></div>
+
+    <h2 class="sec">Customer base</h2>
+    <div class="panel"><table>
+      <thead><tr><th>Segment</th><th class="num">Count</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td class="rowlbl">Indian Railways zones</td><td class="num">${cu.railway_zones}</td><td>Supplying against zonal PCMM purchase orders</td></tr>
+        <tr><td class="rowlbl">NTPC stations</td><td class="num">${cu.ntpc_stations}</td><td>GeM contracts across thermal power stations</td></tr>
+        <tr><td class="rowlbl">Private &amp; infrastructure</td><td class="num">${cu.total-cu.railway_zones-cu.ntpc_stations}</td><td>Includes L&amp;T, KEC, Kalpataru, Transrail</td></tr>
+        <tr class="total"><td>Total customers</td><td class="num">${cu.total}</td><td>Across ${cu.groups} corporate groups</td></tr>
+      </tbody></table></div>
+
+    <h2 class="sec">Scope &amp; delivery</h2>
+    <div class="panel"><table>
+      <thead><tr><th>Particulars</th><th class="num">Figure</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td class="rowlbl">Government purchase orders</td><td class="num">${ob.govt}</td><td>Indian Railways &amp; public sector</td></tr>
+        <tr><td class="rowlbl">Private purchase orders</td><td class="num">${ob.pvt}</td><td>Infrastructure &amp; industrial customers</td></tr>
+        <tr><td class="rowlbl">Consignments dispatched</td><td class="num">${n0(dv.consignments)}</td><td>Current financial year</td></tr>
+        <tr><td class="rowlbl">Delivery locations served</td><td class="num">${n0(dv.consignees)}</td><td>Depots and consignees across India</td></tr>
+        <tr><td class="rowlbl">Product families</td><td class="num">${it.groups}</td><td>Fish plates, metal liners, switches, ISEJ, GIRJ and more</td></tr>
+      </tbody></table></div>
+
+    ${insp.length?`<h2 class="sec">Third-party inspection</h2>
+    <div class="panel"><div style="padding:13px 15px">
+      <p class="muted" style="margin-bottom:8px">Supplies are inspected by independent agencies nominated in the purchase order:</p>
+      ${insp.map(i=>`<span class="badge blue" style="margin-right:6px">${esc(i)}</span>`).join('')}
+    </div></div>`:''}
+
+    <h2 class="sec">Manufacturing</h2>
+    <div class="panel"><table>
+      <thead><tr><th>Particulars</th><th class="num">Figure</th><th>Period</th></tr></thead>
+      <tbody>
+        <tr><td class="rowlbl">Rolled output</td><td class="num">${n0(pr.mt_fy)} MT</td><td>${dl(pr.from_date)} to ${dl(pr.to_date)}</td></tr>
+        <tr><td class="rowlbl">Drawings in production</td><td class="num">${it.drawings}</td><td>To RDSO specification</td></tr>
+      </tbody></table></div>`;
+}
+
+// ---------- INTERNAL VIEW ----------
+function drawInternal(){
+  const b=B; if(!b){$('body').innerHTML='<p class="muted">Dashboard unavailable.</p>';return;}
+  const money_ok=b.orders.book_value!=null;   // the database decided, not this file
+  const o=b.orders,ld=b.ld||{},up=b.unprotected||{},s=b.sales||{},
+        pr=b.production||{},rc=b.receipts||{},cl=b.closed_lines||{};
+
+  // module counters
+  setCnt('c-ord',o.pos_overdue); setCnt('c-sal',s.not_quoted);
+  setCnt('c-prd',pr.needs_review); setCnt('c-kar',(b.me||{}).tasks_overdue);
+
+  // ----- action list -----
+  const acts=[];
+  const A=(sev,what,why,where,val)=>acts.push({sev,what,why,where,val});
+  if(o.lines_overdue>0) A('red',`${o.lines_overdue} order lines past delivery period`,
+      `Across ${o.pos_overdue} purchase orders. Delivery date has passed and the material has not gone out.`,'orders.html',o.lines_overdue);
+  if(up.lines>0) A('red',`${up.lines} overdue lines with no extension applied for`,
+      `Oldest is ${up.worst_days} days late. Every week without a granted extension is LD the customer may levy.`,'orders.html',up.lines);
+  if(money_ok&&ld.amount>0) A('amber','Liquidated damages exposure',
+      `Worst single order: ${esc(ld.worst?.po_no||'')} — ${money(ld.worst?.amount)}. ${esc((ld.worst?.customer||'').slice(0,52))}`,'orders.html',money(ld.amount));
+  if(b.ext_pending>0) A('amber',`${b.ext_pending} extension applications awaiting reply`,
+      'Applied for but not yet granted. The delivery period has not moved.','orders.html',b.ext_pending);
+  if(s.not_quoted>0) A('amber',`${s.not_quoted} enquiries never quoted`,
+      'A customer asked and did not receive a quotation.','sales.html',s.not_quoted);
+  if(b.qtn_stale>0) A('amber',`${b.qtn_stale} quotations older than 30 days`,
+      'Sent, no order received, no follow-up recorded.','sales.html',b.qtn_stale);
+  if(pr.utilisation_pct!=null&&pr.utilisation_pct<70) A('red','Mill utilisation below 70%',
+      `${pr.lay_off_days} lay-off days of ${pr.days}. No reason is recorded against any of them.`,'production.html',pr.utilisation_pct+'%');
+  if(rc.no_po>0) A('amber',`${rc.no_po} deliveries received with no written purchase order`,
+      'Recorded as "Verbal". The company owes for this material on someone\'s word.','production.html',rc.no_po);
+  if(cl.count>0) A('amber',`${cl.count} order lines settled without a dispatch record`,
+      `${n0(cl.qty)} units closed on judgement rather than evidence. Defensible, but not proof.`,'orders.html',cl.count);
+  if(o.pos_linked===0&&o.pos_live>0) A('amber','No order is linked to the quotation that won it',
+      `${o.pos_live} live orders, none linked. Win rate cannot be calculated until they are.`,'sales.html','0');
+  if((b.me||{}).tasks_overdue>0) A('red',`${b.me.tasks_overdue} of your own tasks are overdue`,'Your name is on these.','kartavya.html',b.me.tasks_overdue);
+
+  const sevRank={red:0,amber:1};
+  acts.sort((a,c)=>sevRank[a.sev]-sevRank[c.sev]);
+
+  $('body').innerHTML=`
+    <h2 class="sec">Key figures</h2>
+    <div class="kpis">
+      ${money_ok?kpi('','Order book, still to ship',money(o.open_value),`${o.lines_open} open lines in ${o.pos_open} orders`)
+                :kpi('','Open order lines',n0(o.lines_open),`Across ${o.pos_open} purchase orders`)}
+      ${money_ok?kpi('','Booked this year',money(o.book_value),`${o.pos_live} purchase orders`):''}
+      ${kpi(o.lines_overdue?'red':'green','Lines past delivery period',n0(o.lines_overdue),o.lines_overdue?`In ${o.pos_overdue} orders`:'All within date')}
+      ${money_ok?kpi(ld.amount>0?'amber':'green','Liquidated damages exposure',money(ld.amount||0),`${ld.lines_exposed||0} lines exposed`):''}
+      ${kpi((pr.utilisation_pct??100)<70?'red':'green','Mill utilisation',(pr.utilisation_pct??'—')+'%',`${pr.prod_days||0} running days of ${pr.days||0}`)}
+      ${kpi('','Rolled, last 30 days',n0(pr.mt_30d)+' MT','Last entry '+dl(pr.last_day))}
     </div>
-    <h3>Needs a decision</h3>
-    <div class="card">${alerts.join('')}</div>`;
+
+    <h2 class="sec">Requires your decision</h2>
+    <div class="panel">
+      <div class="phead">Open items, most urgent first<span class="note">${acts.length} item${acts.length===1?'':'s'}</span></div>
+      <table>
+        <thead><tr><th style="width:52%">Item</th><th class="num" style="width:14%">Figure</th><th style="width:12%">Priority</th><th class="noprint" style="width:12%"></th></tr></thead>
+        <tbody>
+        ${acts.length?acts.map(a=>row(esc(a.what),esc(a.why),a.val,
+            a.sev==='red'?'neg':'',
+            a.sev==='red'?'<span class="badge red">Urgent</span>':'<span class="badge amber">Attention</span>',
+            `<a class="btn-sm" href="${a.where}">Open &rsaquo;</a>`)).join('')
+          :`<tr><td colspan="4" style="padding:18px;text-align:center"><span class="badge green">Nothing outstanding</span>
+             <div class="muted" style="margin-top:6px">No overdue lines, no unprotected exposure, no unanswered enquiries.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="sec">Business summary</h2>
+    <div class="panel">
+      <div class="phead">All figures as on ${dl(b.as_of)}</div>
+      <table>
+        <thead><tr><th style="width:46%">Particulars</th><th class="num" style="width:18%">Quantity</th><th class="num" style="width:22%">Value</th><th style="width:14%">Status</th></tr></thead>
+        <tbody>
+          <tr><td><span class="rowlbl">Purchase orders — live</span><span class="rowsub">Excluding dispatch-derived sales records</span></td>
+              <td class="num">${n0(o.pos_live)}</td><td class="num">${money_ok?money(o.book_value):'—'}</td><td></td></tr>
+          <tr><td><span class="rowlbl">Open order lines</span><span class="rowsub">Not yet fully dispatched</span></td>
+              <td class="num">${n0(o.lines_open)}</td><td class="num">${money_ok?money(o.open_value):'—'}</td><td></td></tr>
+          <tr><td><span class="rowlbl">Lines past delivery period</span><span class="rowsub">In ${o.pos_overdue} purchase orders</span></td>
+              <td class="num ${o.lines_overdue?'neg':''}">${n0(o.lines_overdue)}</td><td class="num">—</td>
+              <td>${o.lines_overdue?'<span class="badge red">Overdue</span>':'<span class="badge green">On time</span>'}</td></tr>
+          <tr><td><span class="rowlbl">Liquidated damages exposure</span><span class="rowsub">Government orders only; private orders carry no LD</span></td>
+              <td class="num">${ld.lines_exposed||0} lines</td><td class="num ${ld.amount>0?'neg':''}">${money_ok?money(ld.amount||0):'—'}</td>
+              <td>${ld.amount>0?'<span class="badge amber">At risk</span>':'<span class="badge green">Nil</span>'}</td></tr>
+          <tr><td><span class="rowlbl">Dispatches, last 30 days</span><span class="rowsub">Consignments despatched</span></td>
+              <td class="num">${n0(b.dispatch_30d?.count)}</td><td class="num">—</td><td></td></tr>
+          <tr><td><span class="rowlbl">Production, last 30 days</span><span class="rowsub">Rolled tonnage</span></td>
+              <td class="num">${n0(pr.mt_30d)} MT</td><td class="num">—</td>
+              <td>${(pr.utilisation_pct??100)<70?'<span class="badge red">Below plan</span>':'<span class="badge green">On plan</span>'}</td></tr>
+          <tr><td><span class="rowlbl">Material receipts, last 30 days</span><span class="rowsub">${rc.no_po||0} received without a written order</span></td>
+              <td class="num">${n0(rc.count_30d)}</td><td class="num">${money_ok?money(rc.value_30d):'—'}</td>
+              <td>${rc.no_po?'<span class="badge amber">Check</span>':''}</td></tr>
+          <tr><td><span class="rowlbl">Enquiries received</span><span class="rowsub">${s.quoted||0} quoted, ${s.not_quoted||0} not quoted</span></td>
+              <td class="num">${n0(s.enquiries)}</td><td class="num">${money_ok?money(s.quoted_value):'—'}</td>
+              <td>${s.not_quoted?'<span class="badge amber">Follow up</span>':'<span class="badge green">All quoted</span>'}</td></tr>
+          <tr class="total"><td>Order book booked this year</td><td class="num">${n0(o.pos_live)} orders</td>
+              <td class="num">${money_ok?money(o.book_value):'—'}</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="sec">Modules</h2>
+    <div class="mods">
+      <a class="mod" href="orders.html"><b>Orders</b><span>Pending register, delivery periods, dispatch &amp; LD</span><i class="cnt" id="c-ord"></i></a>
+      <a class="mod" href="sales.html"><b>Sales</b><span>Enquiry, quotation and order pipeline</span><i class="cnt" id="c-sal"></i></a>
+      <a class="mod" href="production.html"><b>Production</b><span>Daily mill output and material receipts</span><i class="cnt" id="c-prd"></i></a>
+      <a class="mod" href="masters.html"><b>Masters</b><span>Customers, suppliers and item master</span></a>
+      <a class="mod" href="kartavya.html"><b>Kartavya</b><span>Tasks, delegation and checklists</span><i class="cnt" id="c-kar"></i></a>
+    </div>`;
+
+  setCnt('c-ord',o.pos_overdue); setCnt('c-sal',s.not_quoted);
+  setCnt('c-prd',pr.needs_review); setCnt('c-kar',(b.me||{}).tasks_overdue);
+}
+function setCnt(id,v){const e=$(id); if(!e)return; if(v>0){e.textContent=v>99?'99+':v;e.style.display='flex';}else e.style.display='none';}
+
+// ---------- export ----------
+function exportExcel(){
+  const rows=[];
+  const push=(...c)=>rows.push(c);
+  push('KSK Engineering Industries Pvt. Ltd.');
+  push(PM?'Company Profile':'Management Dashboard');
+  push('As on', B?dl(B.as_of):'');
+  push('');
+  document.querySelectorAll('#body table').forEach(t=>{
+    const cap=t.closest('.panel')?.querySelector('.phead')?.childNodes[0]?.textContent?.trim();
+    if(cap) push(cap);
+    t.querySelectorAll('tr').forEach(tr=>{
+      const cells=[...tr.children].filter(td=>!td.classList.contains('noprint'))
+        .map(td=>td.innerText.replace(/\s*\n\s*/g,' — ').trim());
+      if(cells.some(x=>x)) push(...cells);
+    });
+    push('');
+  });
+  const csv=rows.map(r=>r.map(c=>{
+    const v=(c??'').toString();
+    return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;
+  }).join(',')).join('\r\n');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='KSK Dashboard '+(B?B.as_of:'')+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+}
+
+// ---------- load ----------
+async function refresh(){
+  $('body').innerHTML='<p class="muted" style="padding:40px;text-align:center">Loading figures…</p>';
+  const [br,cr]=await Promise.all([sb.rpc('director_brief'),sb.rpc('company_profile')]);
+  if(br.error){$('body').innerHTML='<div class="panel"><div style="padding:16px"><b>Could not load the dashboard.</b><div class="muted">'+esc(br.error.message)+'</div></div></div>';return;}
+  B=br.data; CP=cr.error?null:cr.data;
+  $('asof').textContent=dl(B.as_of);
+  draw();
 }
 
 async function route(session){
-  if(!session){ show('screen-login'); return; }
-  const { data, error } = await sb.rpc('my_profile');
-  if(error || !data || !data.length){ show('screen-denied'); return; }
-  ME = data[0];
-  $('who').style.display='block';
-  $('who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  if(!session){show('screen-login');return;}
+  const{data,error}=await sb.rpc('my_profile');
+  if(error||!data||!data.length){show('screen-denied');return;}
+  ME=data[0];
+  $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
+  $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  loadBrief();
-  if(ME.role === 'DIRECTOR' || ME.role === 'ADMIN'){
-    $('admin-card').style.display='block';
-    loadUsers();
-  }
+  await refresh();
+  if(ME.role==='DIRECTOR'||ME.role==='ADMIN'){$('admin-card').style.display='block';loadUsers();}
 }
 
 async function loadUsers(){
-  const { data, error } = await sb.rpc('users_list');
-  if(error){ $('user-list').textContent = error.message; return; }
-  $('user-list').innerHTML = data.map(u => `
-    <div class="user-row">
-      <div class="avatar">${u.full_name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase()}</div>
-      <div class="user-info"><b>${u.full_name}${u.is_super_admin?' 🔒':''}</b><span>${u.email}</span></div>
-      <span class="tag ${u.is_active ? u.role : 'off'}">${u.is_active ? u.role : 'INACTIVE'}</span>
-    </div>`).join('');
+  const{data,error}=await sb.rpc('users_list');
+  if(error){$('user-list').textContent=error.message;return;}
+  $('user-list').innerHTML=`<table><thead><tr><th>Name</th><th>Email address</th><th>Role</th><th>Status</th></tr></thead><tbody>
+    ${data.map(u=>`<tr><td class="rowlbl">${esc(u.full_name)}${u.is_super_admin?' 🔒':''}</td>
+      <td>${esc(u.email)}</td>
+      <td><span class="badge ${u.role==='DIRECTOR'?'amber':u.role==='ADMIN'?'blue':'green'}">${esc(u.role.charAt(0)+u.role.slice(1).toLowerCase())}</span></td>
+      <td>${u.is_active?'<span class="badge green">Active</span>':'<span class="badge red">Deactivated</span>'}</td></tr>`).join('')}
+    </tbody></table>`;
 }
 
-$('btn-save').onclick = async () => {
-  if(!ME || ME.role!=='DIRECTOR'){ msg('admin-msg','Only a Director can save users.','err'); return; }
-  const p = { p_email:$('u-email').value, p_full_name:$('u-name').value,
-              p_role:$('u-role').value, p_is_active:$('u-active').value==='true' };
-  if(!p.p_email || !p.p_full_name){ msg('admin-msg','Email and name are required.','err'); return; }
-  const { error } = await sb.rpc('user_save', p);
-  if(error){ msg('admin-msg', error.message, 'err'); return; }
-  msg('admin-msg','Saved.','ok'); $('u-email').value=''; $('u-name').value='';
-  loadUsers();
+$('btn-save').onclick=async()=>{
+  if(!ME||ME.role!=='DIRECTOR'){msg('admin-msg','Only a Director can save users.','err');return;}
+  const p={p_email:$('u-email').value,p_full_name:$('u-name').value,p_role:$('u-role').value,p_is_active:$('u-active').value==='true'};
+  if(!p.p_email||!p.p_full_name){msg('admin-msg','Email and name are both required.','err');return;}
+  const{error}=await sb.rpc('user_save',p);
+  if(error){msg('admin-msg',error.message,'err');return;}
+  msg('admin-msg','Saved.','ok');$('u-email').value='';$('u-name').value='';loadUsers();
 };
 
-sb.auth.getSession().then(({data}) => route(data.session));
-sb.auth.onAuthStateChange((_e, session) => route(session));
+document.addEventListener('keydown',e=>{if(e.key==='F5'&&!e.ctrlKey){e.preventDefault();refresh();}});
+sb.auth.getSession().then(({data})=>route(data.session));
+sb.auth.onAuthStateChange((_e,s)=>route(s));
 </script>
 </body>
 </html>
