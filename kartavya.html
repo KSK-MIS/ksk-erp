@@ -1,8 +1,10 @@
 <!doctype html>
 <!-- ============================================================
      KSK ERP 1.0 — Module 1: KARTAVYA (Accountability)
-     Tabs: My Tasks · Delegation · Capture · Checklists · Desk · Scoreboard
-     Deploys on: GitHub Pages beside index.html. Upload whole, never edit.
+     Restructured to a TaskPro-style responsive sidebar dashboard.
+     Screens: Task Overview · Pending Tasks · My Tasks · Overall
+     Progress · Dashboard · Checklists · Capture · (Assign Task).
+     Deploys on GitHub Pages beside index.html. Upload whole, never edit.
      Security lives in Postgres RLS + guarded RPCs, not in this file.
      ============================================================ -->
 <html lang="en">
@@ -11,234 +13,464 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kartavya · KSK ERP</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
-  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  body { background:var(--bg); min-height:100vh; padding-bottom:70px; }
-  header { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
-  header a { color:var(--gold); text-decoration:none; font-size:20px; }
-  header h1 { font-size:16px; flex:1; } header h1 small { display:block; font-weight:400; opacity:.7; font-size:11px; }
-  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:3px 9px; font-size:11.5px; }
-  nav { display:flex; overflow-x:auto; background:#fff; border-bottom:1px solid #e2e7ee; position:sticky; top:53px; z-index:4; }
-  nav button { flex:1; min-width:86px; padding:11px 6px; border:0; background:none; font-size:12.5px; font-weight:600; color:#667; border-bottom:3px solid transparent; cursor:pointer; }
-  nav button.on { color:var(--navy); border-color:var(--gold); }
-  main { max-width:560px; margin:0 auto; padding:12px; }
-  .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:14px; margin-bottom:10px; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .grow { flex:1; min-width:0; }
-  .t-title { font-size:14.5px; font-weight:600; color:#182b45; }
-  .t-sub { font-size:12px; color:#778; margin-top:2px; }
-  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
-  .tag.late { background:#fdeaea; color:var(--bad); } .tag.ok { background:#e6f4ea; color:var(--ok); }
-  .tag.drift { background:#fff3d6; color:var(--warn); } .tag.info { background:#e2ecff; color:#1c4fa0; }
-  button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
-  button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
-  input, select, textarea { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
-  label { font-size:11.5px; color:#556; display:block; margin-top:8px; }
-  h2 { font-size:13.5px; color:var(--navy); margin:14px 2px 8px; }
-  .muted { color:#778; font-size:12.5px; }
-  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
-  .kpi div { background:#fff; border-radius:10px; padding:10px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
-  .kpi b { font-size:20px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
-  .kpi .alert b { color:var(--bad); }
-  table { width:100%; border-collapse:collapse; font-size:12.5px; }
-  th { text-align:left; color:#788; font-size:10.5px; padding:6px 4px; border-bottom:1px solid #eef; }
-  td { padding:8px 4px; border-bottom:1px solid #f2f4f8; }
-  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
-  dialog { border:0; border-radius:14px; padding:18px; width:min(92vw,420px); }
-  dialog::backdrop { background:rgba(15,36,64,.5); }
+  :root{--sb:#12395f;--sb2:#0d2a47;--gold:#c9a227;--gold2:#a8871f;--brand:#12395f;--mint:#c9a227;--green:#15803d;--bg:#eef1f5;--ink:#1a1a1a;--muted:#5f6b7a;--card:#fff;--blue:#175cd3;--red:#b42318;--amber:#a15c07;--line:#d0d7de;--head:#f1f4f8;}
+  *{box-sizing:border-box;margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  body{background:var(--bg);color:var(--ink);}
+  a{color:inherit;text-decoration:none;}
+  /* sidebar */
+  .sidebar{position:fixed;top:0;left:0;bottom:0;width:250px;background:linear-gradient(180deg,var(--sb),var(--sb2));color:#dce7f2;display:flex;flex-direction:column;z-index:40;transition:transform .25s;}
+  .brand{padding:20px 20px 8px;}
+  .brand .logo{font-size:23px;font-weight:800;color:#fff;}
+  .brand .logo span{color:var(--mint);}
+  .brand .sub{font-size:9.5px;letter-spacing:1.5px;color:#9ab0c6;margin-top:3px;text-transform:uppercase;}
+  .navsec{padding:6px 14px;overflow-y:auto;}
+  .navsec .h{font-size:10px;letter-spacing:1.5px;color:#8ba0b6;margin:14px 6px 6px;}
+  .navitem{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;color:#cdd9e6;margin-bottom:2px;}
+  .navitem:hover{background:rgba(255,255,255,.06);}
+  .navitem.on{background:rgba(201,162,39,.18);color:#fff;box-shadow:inset 3px 0 0 var(--gold);}
+  .navitem .ic{width:20px;text-align:center;}
+  .navitem .lbl{flex:1;}
+  .navitem .badge{font-size:11px;font-weight:700;background:rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:1px 8px;min-width:22px;text-align:center;}
+  .navitem .badge.red{background:var(--red);}
+  .spacer{flex:1;}
+  .usercard{margin:10px 12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.06);display:flex;align-items:center;gap:10px;}
+  .avatar{width:38px;height:38px;border-radius:9px;background:var(--gold);color:var(--sb2);font-weight:800;display:flex;align-items:center;justify-content:center;}
+  .usercard .nm{font-size:13px;font-weight:700;color:#fff;} .usercard .rl{font-size:11px;color:#9fb3c8;}
+  .signout{margin:0 12px 14px;padding:10px;text-align:center;border-radius:10px;background:rgba(255,255,255,.06);color:#cdd9e6;font-size:13px;cursor:pointer;border:0;}
+  /* main */
+  .main{margin-left:250px;padding:22px 26px;min-height:100vh;}
+  .topbar{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
+  .topbar h1{font-size:25px;font-weight:800;}
+  .topbar .date{font-size:12.5px;color:var(--muted);margin-top:2px;}
+  .hamb{display:none;}
+  .btn{border:0;border-radius:10px;padding:10px 15px;font-size:13px;font-weight:700;cursor:pointer;background:#e7efeb;color:var(--ink);}
+  .btn.green{background:linear-gradient(135deg,#1a4a78,#12395f);color:#fff;}
+  .btn.ghost{background:#fff;border:1px solid var(--line);}
+  .push{margin-left:auto;display:flex;gap:8px;}
+  /* kpi */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px;}
+  .kpi{background:var(--card);border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(18,57,95,.08);border-left:5px solid var(--brand);}
+  .kpi.blue{border-color:var(--blue);}.kpi.red{border-color:var(--red);}.kpi.amber{border-color:var(--amber);}.kpi.green{border-color:var(--green);}
+  .kpi .k{font-size:11px;letter-spacing:.6px;color:var(--muted);text-transform:uppercase;font-weight:700;}
+  .kpi .v{font-size:33px;font-weight:800;margin-top:6px;}
+  .statc{border-radius:14px;padding:18px;color:#fff;box-shadow:0 1px 3px rgba(15,42,34,.1);}
+  .statc .k{font-size:11px;letter-spacing:.6px;text-transform:uppercase;font-weight:700;color:rgba(255,255,255,.85);}
+  .statc .v{font-size:30px;font-weight:800;margin-top:6px;}
+  /* panel/table */
+  .panel{background:var(--card);border-radius:14px;box-shadow:0 1px 3px rgba(15,42,34,.06);padding:18px;margin-bottom:16px;}
+  .panel .ph{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+  .panel .ph h2{font-size:17px;font-weight:800;}
+  .search{flex:1;min-width:150px;max-width:340px;}
+  .search input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#f5f7fa;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;padding:8px;border-bottom:1px solid var(--line);}
+  td{padding:11px 8px;border-bottom:1px solid #f1f5f3;vertical-align:middle;}
+  tr.grp td{background:var(--head);font-weight:800;font-size:12px;color:var(--sb);letter-spacing:.5px;}
+  .idbadge{display:inline-block;min-width:26px;text-align:center;background:#eef2f0;border-radius:6px;padding:2px 6px;font-size:11.5px;color:#5a6f68;}
+  .pill{font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;}
+  .pill.ok{background:#e6f6ee;color:#0e7a4e;}.pill.late{background:#fdecec;color:#c0322f;}.pill.open{background:#eaf1fd;color:#2b5cb8;}.pill.warn{background:#fef3e2;color:#a5670a;}.pill.mut{background:#eef2f0;color:#6b7f78;}
+  .inp{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#fff;margin-top:4px;}
+  label.lb{font-size:11.5px;color:var(--muted);font-weight:700;display:block;margin-top:12px;text-transform:uppercase;letter-spacing:.5px;}
+  .emprow{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;cursor:pointer;background:#fff;}
+  .emprow:hover{border-color:var(--gold);}
+  .emprow .av{width:42px;height:42px;border-radius:10px;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .wa{width:40px;height:40px;border-radius:50%;background:#25d366;color:#fff;border:0;font-size:17px;cursor:pointer;}
+  .gauge{width:96px;height:96px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+  .gauge .inner{width:72px;height:72px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .pendwrap{display:grid;grid-template-columns:360px 1fr;gap:16px;}
+  #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--sb);color:#fff;padding:11px 20px;border-radius:999px;font-size:13px;display:none;z-index:60;}
+  dialog{border:0;border-radius:16px;padding:20px;width:min(94vw,440px);}
+  dialog::backdrop{background:rgba(15,36,64,.5);}
+  .overlay{display:none;}
+  @media(max-width:860px){
+    .sidebar{transform:translateX(-100%);width:270px;} body.nav-open .sidebar{transform:none;}
+    .main{margin-left:0;padding:16px;}
+    .hamb{display:inline-flex;}
+    .kpis{grid-template-columns:repeat(2,1fr);} .grid3,.grid2,.pendwrap{grid-template-columns:1fr;}
+    body.nav-open .overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:35;}
+  }
 </style>
 </head>
 <body>
-<header>
-  <a href="./index.html">←</a>
-  <h1>Kartavya <small>Accountability · KSK ERP 1.0</small></h1>
-  <div class="chip" id="who"></div>
-</header>
-<nav id="nav"></nav>
-<main id="main"><p class="muted" style="padding:30px;text-align:center">Loading…</p></main>
+<div id="app"></div>
+<div class="overlay" onclick="document.body.classList.remove('nav-open')"></div>
 <div id="toast"></div>
 <dialog id="dlg"></dialog>
 
 <script>
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
-const $ = s => document.querySelector(s);
-let ME = null, USERS = [], TAB = 'my';
-const FREQ = {D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly',H:'Half-yearly',Y:'Yearly'};
-const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
-const today = () => new Date().toISOString().slice(0,10);
-function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',2500); }
-async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
-async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
 
-const TABS = [['my','My Tasks'],['del','Delegation'],['cap','Capture'],['chk','Checklists'],['desk','Desk'],['score','Scoreboard']];
+let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
+let OV_TASKS=[], PEND={}, BADGE={pending:0,mytasks:0,checklists:0};
+const PHONES = {}; // email -> intl number (digits only). Empty until numbers are added; enables WhatsApp reminders.
+const FREQ={D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly',H:'Half-yearly',Y:'Yearly'};
+
+const $=s=>document.querySelector(s);
+const esc=t=>(t??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today=()=>new Date().toISOString().slice(0,10);
+const fmt=d=>{ if(!d) return '—'; const x=new Date(String(d).length<=10? d+'T00:00':d); return isNaN(x)?'—':x.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric'}); };
+const dateStr=()=>new Date().toLocaleDateString('en-GB',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+const isAdmin=()=>ME&&(ME.role==='DIRECTOR'||ME.role==='ADMIN');
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
+async function rpc(fn,args){ const {data,error}=await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
+async function q(view,mod){ let x=sb.from(view).select('*'); if(mod)x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
+function initials(n){ return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?'; }
+function avColor(n){ const cs=['#12395f','#175cd3','#15803d','#a15c07','#7b3f9e','#b42318','#0e7490','#c9a227']; let h=0; for(const c of (n||'x')) h=(h+c.charCodeAt(0))%cs.length; return cs[h]; }
+function dlg(html){ const d=$('#dlg'); d.innerHTML=html; d.showModal(); }
+function closeDlg(){ $('#dlg').close(); }
+function view(html){ $('#view').innerHTML=html; document.body.classList.remove('nav-open'); }
+
+// ---- nav / shell ----
+const NAV=[
+  {id:'overview',  label:'Task Overview',   icon:'📋', admin:false},
+  {id:'pending',   label:'Pending Tasks',   icon:'⚠️', admin:true},
+  {id:'mytasks',   label:'My Tasks',        icon:'🗒️', admin:false},
+  {id:'progress',  label:'Overall Progress',icon:'🎯', admin:true},
+  {id:'dash',      label:'Dashboard',       icon:'📈', admin:true},
+  {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
+  {id:'capture',   label:'Capture',         icon:'🔒', admin:false},
+];
+function drawShell(){
+  $('#app').innerHTML=`
+   <aside class="sidebar">
+     <div class="brand"><div class="logo">Kartav<span>ya</span></div><div class="sub">KSK ERP 1.0 · Accountability</div></div>
+     <div class="navsec"><div class="h">MAIN</div><div id="nav"></div></div>
+     <div class="spacer"></div>
+     <div class="usercard"><div class="avatar">${initials(ME.full_name)}</div><div><div class="nm">${esc(ME.full_name.split(' ')[0])}</div><div class="rl">${esc(ME.role)}</div></div></div>
+     <button class="signout" onclick="location.href='./index.html'">← Back to Portal</button>
+   </aside>
+   <main class="main"><div id="view"></div></main>`;
+  drawNav();
+}
 function drawNav(){
-  const t = (ME.role==='DIRECTOR'||ME.role==='ADMIN') ? TABS : TABS.filter(x=>x[0]!=='desk');
-  $('#nav').innerHTML = t.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
+  const items=NAV.filter(n=>!n.admin||isAdmin());
+  $('#nav').innerHTML=items.map(n=>{
+    const b = n.id==='pending'?BADGE.pending : n.id==='mytasks'?BADGE.mytasks : n.id==='checklists'?BADGE.checklists : 0;
+    const badge = b? `<span class="badge ${n.id==='pending'?'red':''}">${b}</span>` : '';
+    return `<div class="navitem ${TAB===n.id?'on':''}" onclick="go('${n.id}')"><span class="ic">${n.icon}</span><span class="lbl">${n.label}</span>${badge}</div>`;
+  }).join('');
 }
-function go(t){ TAB=t; drawNav(); render[t](); }
+function go(t){ TAB=t; drawNav(); (render[t]||render.overview)(); }
 
-function taskCard(t, mine){
-  const od = t.status==='OPEN' && t.due_current < today();
-  const drift = t.revision_count>0;
-  return `<div class="card"><div class="row">
-    <div class="grow"><div class="t-title">${esc(t.title)}</div>
-      <div class="t-sub">${t.task_no} · ${mine?'from '+esc(t.assigned_by_name):'→ '+esc(t.assignee_name)} · due ${fmt(t.due_current)}
-      ${t.detail?'<br>'+esc(t.detail):''}</div></div>
-    ${od?'<span class="tag late">OVERDUE</span>':''}
-    ${drift?`<span class="tag drift" onclick="history_('${t.id}')">${t.revision_count} rev ⓘ</span>`:''}
-    ${t.status!=='OPEN'?`<span class="tag ${t.status==='DONE'?'ok':'info'}">${t.status}</span>`:''}
-    </div>
-    ${t.status==='OPEN'?`<div class="row" style="margin-top:9px">
-      ${mine?`<button class="a gold" onclick="done('${t.id}')">✓ Done</button>`:''}
-      <button class="a" onclick="progress('${t.id}')">✔→ Progress</button>
-      <button class="a" onclick="revise('${t.id}')">⟳ Move date</button>
-      ${!mine?`<button class="a" onclick="cancel('${t.id}')">✕</button>`:''}
-    </div>`:''}</div>`;
+function topbar(title,sub,right){
+  return `<div class="topbar">
+    <button class="btn ghost hamb" onclick="document.body.classList.toggle('nav-open')">☰</button>
+    <div><h1>${title}</h1><div class="date">${sub}</div></div>
+    ${right?`<div class="push">${right}</div>`:''}</div>`;
 }
-function markCard(m, mine){
-  const late = ['overdue'].includes(m.status), pend = ['pending','overdue'].includes(m.status);
-  return `<div class="card row">
-    <div class="grow"><div class="t-title">${esc(m.title)}</div>
-      <div class="t-sub">${mine?'':esc(m.assignee_name)+' · '}${FREQ[m.frequency]||m.frequency} · due ${fmt(m.due_date)} · ${m.on_miss}</div></div>
-    ${late?`<span class="tag late">OVERDUE ×${m.overdue_count}</span>`:''}
-    ${m.status==='missed'?'<span class="tag late">MISSED</span>':''}
-    ${['done','done_late'].includes(m.status)?`<span class="tag ok">${m.status.toUpperCase()}</span>`:''}
-    ${pend&&mine?`<button class="a gold" onclick="mark('${m.id}')">✓</button>`:''}</div>`;
+const kpi=(k,v,cls)=>`<div class="kpi ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+const statCard=(k,v,bg)=>`<div class="statc" style="background:${bg}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+
+function taskStatus(t){
+  if(t.status==='OPEN') return t.due_current<today()?'<span class="pill late">Overdue</span>':'<span class="pill open">Pending</span>';
+  if(t.status==='DONE') return '<span class="pill ok">Completed</span>';
+  if(t.status==='DONE_LATE') return '<span class="pill ok">Completed · late</span>';
+  if(t.status==='CANCELLED') return '<span class="pill mut">Cancelled</span>';
+  return `<span class="pill mut">${esc(t.status)}</span>`;
+}
+function markPill(m){
+  if(['done','done_late'].includes(m.status)) return `<span class="pill ok">${m.status.replace('_',' ')}</span>`;
+  if(m.status==='overdue') return `<span class="pill late">overdue ×${m.overdue_count}</span>`;
+  if(m.status==='missed') return '<span class="pill late">missed</span>';
+  return '<span class="pill open">pending</span>';
+}
+function taskTable(tasks){
+  if(!tasks.length) return '<p style="color:var(--muted);padding:14px 4px">No tasks match.</p>';
+  const groups=[
+    ['Pending',   tasks.filter(x=>x.status==='OPEN')],
+    ['Completed', tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE')],
+    ['Cancelled', tasks.filter(x=>x.status==='CANCELLED')],
+  ].filter(g=>g[1].length);
+  let rows='';
+  for(const [name,arr] of groups){
+    rows+=`<tr class="grp"><td colspan="6">${name} (${arr.length})</td></tr>`;
+    rows+=arr.map(x=>`<tr>
+      <td><span class="idbadge">${esc(x.task_no||'—')}</span></td>
+      <td>${esc(x.assignee_name||'')}</td>
+      <td>${esc(x.title)}</td>
+      <td>${fmt(x.due_original||x.due_current)}</td>
+      <td>${fmt(x.done_at)}</td>
+      <td>${taskStatus(x)}</td></tr>`).join('');
+  }
+  return `<table><thead><tr><th>Task ID</th><th>Name</th><th>Task</th><th>Plan Date</th><th>Actual Date</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-const render = {
-  async my(){
-    const [ts, ms] = await Promise.all([
-      q('v_tasks', x=>x.eq('assignee_email', ME.email).eq('status','OPEN').order('due_current')),
-      q('v_checklist_marks', x=>x.eq('assignee_email', ME.email).in('status',['pending','overdue']).lte('due_date', today()).order('due_date'))
+// ---- screens ----
+const render={
+  async overview(){
+    const tasks=await q('v_tasks', x=>x.order('created_at',{ascending:false}));
+    OV_TASKS=tasks; const t=today();
+    const open=tasks.filter(x=>x.status==='OPEN');
+    const completed=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE');
+    const overdue=open.filter(x=>x.due_current<t);
+    view(`${topbar('Task Overview',dateStr(), isAdmin()?`<button class="btn green" onclick="go('assign')">＋ Assign New Task</button>`:'')}
+      <div class="kpis">
+        ${kpi('Total Tasks',tasks.length,'')}
+        ${kpi('Pending',open.length,'blue')}
+        ${kpi('Completed',completed.length,'green')}
+        ${kpi('Overdue',overdue.length,'red')}
+      </div>
+      <div class="panel">
+        <div class="ph"><h2>All Tasks</h2>
+          <div class="search"><input id="ov-q" placeholder="🔍 Search name or task…" oninput="ovFilter()"></div>
+          <button class="btn ghost" onclick="go('overview')">⟳ Refresh</button></div>
+        <div id="ov-table">${taskTable(tasks)}</div>
+      </div>`);
+  },
+  async pending(){
+    const tasks=await q('v_tasks', x=>x.eq('status','OPEN'));
+    const t=today(); PEND={};
+    tasks.forEach(x=>{ const k=x.assignee_email||'?'; (PEND[k]=PEND[k]||{name:x.assignee_name,email:k,items:[]}).items.push(x); });
+    const emps=Object.values(PEND).sort((a,b)=>b.items.length-a.items.length);
+    const list=emps.map(e=>{
+      const od=e.items.filter(x=>x.due_current<t).length;
+      return `<div class="emprow" onclick="pendSel('${esc(e.email)}')">
+        <div class="av" style="background:${avColor(e.name)}">${initials(e.name)}</div>
+        <div style="flex:1"><div style="font-weight:700">${esc(e.name||e.email)}</div>
+          <div style="font-size:12px;color:var(--muted)">${e.items.length} pending${od?` · <span style="color:var(--red)">${od} overdue</span>`:''}</div></div>
+        <button class="wa" title="WhatsApp reminder" onclick="event.stopPropagation();waRemind('${esc(e.email)}','${esc(e.name||'')}',${e.items.length})">🟢</button>
+      </div>`;
+    }).join('') || '<p style="color:var(--muted)">No pending tasks. ✓</p>';
+    view(`${topbar('Pending Tasks','Select an employee to view their tasks','')}
+      <div class="pendwrap">
+        <div class="panel"><div class="ph"><h2>Employees</h2><span style="color:var(--muted);font-size:12px">${emps.length} people · ${tasks.length} tasks</span></div>
+          <div class="search" style="max-width:none"><input id="emp-q" placeholder="🔍 Search employee…" oninput="pendFilter()"></div>
+          <div id="emp-list" style="margin-top:10px">${list}</div></div>
+        <div class="panel" id="emp-detail"><p style="color:var(--muted);text-align:center;padding:40px">Select an employee to view their pending tasks</p></div>
+      </div>`);
+  },
+  async mytasks(){
+    const [ts,ms]=await Promise.all([
+      q('v_tasks', x=>x.eq('assignee_email',ME.email).eq('status','OPEN').order('due_current')),
+      q('v_checklist_marks', x=>x.eq('assignee_email',ME.email).in('status',['pending','overdue']).lte('due_date',today()).order('due_date'))
     ]);
-    $('#main').innerHTML = `<h2>My checklist — today</h2>` +
-      (ms.map(m=>markCard(m,true)).join('')||'<p class="muted">Nothing due. ✓</p>') +
-      `<h2>My open tasks (${ts.length})</h2>` + (ts.map(t=>taskCard(t,true)).join('')||'<p class="muted">No open tasks.</p>');
+    const t=today();
+    view(`${topbar('My Tasks',`${esc(ME.full_name)} — daily tasks & checklist`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+        ${kpi('Open Tasks',ts.length,'blue')}
+        ${kpi('Checklist Due',ms.length,'amber')}
+        ${kpi('Overdue',ts.filter(x=>x.due_current<t).length+ms.filter(m=>m.status==='overdue').length,'red')}
+      </div>
+      <div class="panel"><div class="ph"><h2>Today's Checklist</h2></div>
+        ${ms.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th><th>Action</th></tr></thead><tbody>`+
+          ms.map(m=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td><td>${fmt(m.due_date)} ${m.status==='overdue'?`<span class="pill late">overdue ×${m.overdue_count}</span>`:''}</td>
+            <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`).join('')+`</tbody></table>`
+          :'<p style="color:var(--muted)">Nothing due today ✓</p>'}
+      </div>
+      <div class="panel"><div class="ph"><h2>My Open Tasks</h2></div>
+        ${ts.length?`<table><thead><tr><th>Task ID</th><th>Task</th><th>From</th><th>Deadline</th><th>Action</th></tr></thead><tbody>`+
+          ts.map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td>
+            <td>${esc(x.title)}${x.detail?`<br><span style="color:var(--muted);font-size:12px">${esc(x.detail)}</span>`:''}</td>
+            <td>${esc(x.assigned_by_name||'')}</td>
+            <td>${fmt(x.due_current)} ${x.due_current<t?'<span class="pill late">overdue</span>':''}</td>
+            <td><button class="btn green" onclick="doDone('${x.id}')">✓ Done</button> <button class="btn" onclick="doRevise('${x.id}')">⟳ Move</button></td></tr>`).join('')+`</tbody></table>`
+          :'<p style="color:var(--muted)">No open tasks.</p>'}
+      </div>`);
   },
-  async del(){
-    const all = (ME.role!=='STAFF');
-    const ts = await q('v_tasks', x=>{ let y = x.order('status').order('due_current');
-      return all ? y : y.eq('assigned_by_email', ME.email); });
-    $('#main').innerHTML = `<div class="card">
-      <div class="t-title">New task</div>
-      <input id="nt-title" placeholder="What must be done?">
-      <textarea id="nt-detail" rows="2" placeholder="Details (optional)"></textarea>
-      <div class="row"><div class="grow"><label>Assign to</label><select id="nt-who">${USERS.map(u=>`<option value="${u.email}">${esc(u.full_name)}</option>`).join('')}</select></div>
-      <div class="grow"><label>Due</label><input id="nt-due" type="date" value="${today()}"></div></div>
-      <button class="a dark" style="width:100%;margin-top:10px" onclick="createTask()">Assign task</button></div>
-      <h2>Register (${ts.length}) — drift is visible, never punished</h2>` +
-      (ts.map(t=>taskCard(t, t.assignee_email===ME.email)).join('')||'<p class="muted">Empty.</p>');
-  },
-  async cap(){
-    const cs = await q('v_capture', x=>x.in('status',['INBOX','SOMEDAY']).order('created_at',{ascending:false}));
-    $('#main').innerHTML = `<div class="card"><div class="t-title">Capture — private. Provably. 🔒</div>
-      <textarea id="cp" rows="2" placeholder="Anything on your mind…"></textarea>
-      <button class="a gold" style="width:100%;margin-top:8px" onclick="capAdd()">+ Capture</button></div>` +
-      cs.map(c=>`<div class="card"><div class="t-sub" style="font-size:13.5px;color:#233">${esc(c.content)}</div>
-        <div class="row" style="margin-top:8px">
-        <button class="a" onclick="capTask('${c.id}')">→ Task</button>
-        ${c.status!=='SOMEDAY'?`<button class="a" onclick="capSet('${c.id}','SOMEDAY')">Someday</button>`:''}
-        <button class="a" onclick="capSet('${c.id}','DROPPED')">Drop</button>
-        ${c.status==='SOMEDAY'?'<span class="tag info">SOMEDAY</span>':''}</div></div>`).join('') || '';
-  },
-  async chk(){
-    const admin = ME.role!=='STAFF';
-    const ms = await q('v_checklist_marks', x=>x.order('due_date',{ascending:false}).limit(60));
-    let form = '';
-    if(admin) form = `<div class="card"><div class="t-title">New recurring duty</div>
-      <input id="ck-title" placeholder="Duty (e.g. Daily production report)">
-      <div class="row"><div class="grow"><label>Assignee</label><select id="ck-who">${USERS.map(u=>`<option value="${u.email}">${esc(u.full_name)}</option>`).join('')}</select></div>
-      <div class="grow"><label>Frequency</label><select id="ck-freq">${Object.entries(FREQ).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div></div>
-      <label>If missed: <b>lapse</b> = record &amp; move on · <b>carry</b> = stays owed</label>
-      <select id="ck-miss"><option value="lapse">lapse</option><option value="carry">carry</option></select>
-      <button class="a dark" style="width:100%;margin-top:10px" onclick="ckCreate()">Create</button></div>`;
-    const cs = await q('v_checklists', x=>x.eq('active',true).order('assignee_name').order('frequency'));
-    const mine = cs.filter(c=>c.assignee_email===ME.email);
-    const roster = admin ? cs : mine;
-    $('#main').innerHTML = form +
-      `<h2>${admin?'All duties':'My duties'} (${roster.length})</h2>` +
-      (roster.map(c=>`<div class="card row">
-        <div class="grow"><div class="t-title">${esc(c.title)}</div>
-          <div class="t-sub">${admin?esc(c.assignee_name)+' · ':''}${FREQ[c.frequency]||c.frequency} · ${c.on_miss} · next ${fmt(c.next_due)}</div></div>
-        ${admin?`<button class="a" onclick="ckRetire('${c.id}')">Retire</button>`:''}</div>`).join('')
-        || '<p class="muted">No duties yet.</p>') +
-      `<h2>Occurrences</h2>` +
-      (ms.map(m=>markCard(m, m.assignee_email===ME.email)).join('')||'<p class="muted">Nothing yet.</p>');
-  },
-  async desk(){
-    const [ts, ms] = await Promise.all([
-      q('v_tasks', x=>x.eq('status','OPEN').order('due_current')),
-      q('v_checklist_marks', x=>x.in('status',['overdue','missed']).order('due_date',{ascending:false}).limit(30))
+  async progress(){
+    const m=today().slice(0,8)+'01';
+    const [rows,tasks,marks]=await Promise.all([
+      q('v_scoreboard', x=>x.eq('month',m).order('overall',{ascending:false})),
+      q('v_tasks'), q('v_checklist_marks')
     ]);
-    const od = ts.filter(t=>t.due_current<today()), dr = ts.filter(t=>t.revision_count>0);
-    $('#main').innerHTML = `<div class="kpi">
-      <div class="${od.length?'alert':''}"><b>${od.length}</b><span>tasks overdue</span></div>
-      <div class="${dr.length?'alert':''}"><b>${dr.length}</b><span>drifting (revised)</span></div>
-      <div class="${ms.length?'alert':''}"><b>${ms.length}</b><span>checklist lapses</span></div></div>
-      <h2>Overdue first — exceptions outrank totals</h2>` +
-      (od.map(t=>taskCard(t,false)).join('')||'<p class="muted">Nothing overdue. ✓</p>') +
-      `<h2>Drifting</h2>` + (dr.filter(t=>!od.includes(t)).map(t=>taskCard(t,false)).join('')||'<p class="muted">No drift.</p>') +
-      `<h2>Checklist exceptions</h2>` + (ms.map(m=>markCard(m,false)).join('')||'<p class="muted">All clear.</p>');
+    const t=today(); let onTime=0,late=0,missed=0;
+    tasks.forEach(x=>{ if(x.status==='DONE')onTime++; else if(x.status==='DONE_LATE')late++; else if(x.status==='OPEN'&&x.due_current<t)missed++; });
+    marks.forEach(x=>{ if(x.status==='done')onTime++; else if(x.status==='done_late')late++; else if(x.status==='missed'||x.status==='overdue')missed++; });
+    const total=onTime+late+missed;
+    const pctOn=total?Math.round(onTime/total*100):0;
+    const avg=rows.length?Math.round(rows.reduce((s,r)=>s+(+r.overall||0),0)/rows.length*100):0;
+    view(`${topbar('Overall Progress','Employee-wise task completion overview','<button class="btn ghost" onclick="go(\'progress\')">⟳ Refresh</button>')}
+      <div class="kpis">
+        ${statCard('Total Items',total,'linear-gradient(135deg,#c9a227,#a8871f)')}
+        ${statCard('On Time',onTime,'linear-gradient(135deg,#175cd3,#12395f)')}
+        ${statCard('Delayed / Missed',late+missed,'linear-gradient(135deg,#c0392b,#b42318)')}
+        ${statCard('% On Time',pctOn+'%','linear-gradient(135deg,#1e9e4f,#15803d)')}
+      </div>
+      <div class="panel"><div class="ph"><h2>People (${rows.length}) · avg ${avg}%</h2>
+        <span style="font-size:12px;color:var(--muted)">Legend:</span> <span class="pill ok">≥75%</span> <span class="pill warn">40–74%</span> <span class="pill late">&lt;40%</span></div>
+        <div class="grid3">${rows.map(gaugeCard).join('')||'<p style="color:var(--muted)">No activity this month.</p>'}</div>
+      </div>`);
   },
-  async score(){
-    const m = today().slice(0,8)+'01';
-    const rows = await q('v_scoreboard', x=>x.eq('month', m).order('overall',{ascending:false}));
-    $('#main').innerHTML = `<div class="card"><div class="t-title">Scoreboard — ${new Date().toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</div>
-      <p class="muted" style="margin-top:4px">Overall = 70% tasks + 30% checklists. On-time = 1, late = ½. Revisions shown, never deducted.</p>
-      <table><tr><th>Person</th><th>Tasks</th><th>Checklist</th><th>Overall</th><th>Rev</th></tr>
-      ${rows.map(r=>`<tr><td>${esc(r.full_name)}</td><td>${r.task_score??'—'} <span class="muted">/${r.tasks_due}</span></td>
-        <td>${r.checklist_score??'—'} <span class="muted">/${r.checklist_due}</span></td>
-        <td><b>${r.overall}</b></td><td>${r.revisions}</td></tr>`).join('') || '<tr><td colspan=5 class="muted">No activity this month yet.</td></tr>'}
-      </table></div>`;
+  async dash(){
+    const [tasks,marks]=await Promise.all([q('v_tasks'),q('v_checklist_marks')]);
+    const t=today();
+    const done=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE').length+marks.filter(m=>m.status==='done'||m.status==='done_late').length;
+    const overdue=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t).length+marks.filter(m=>m.status==='missed'||m.status==='overdue').length;
+    const compRate=(done+overdue)?Math.round(done/(done+overdue)*100):0;
+    const od=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t);
+    const avgDelay=od.length?Math.round(od.reduce((s,x)=>s+Math.max(0,(new Date(t)-new Date(x.due_current))/864e5),0)/od.length):0;
+    const active=new Set([...tasks.filter(x=>x.status==='OPEN').map(x=>x.assignee_email),...marks.filter(m=>['pending','overdue','missed'].includes(m.status)).map(m=>m.assignee_email)]).size;
+    view(`${topbar('Dashboard','Analytics & Performance Metrics','<button class="btn ghost" onclick="go(\'dash\')">⟳ Refresh Data</button>')}
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+        ${kpi('Completion Rate',compRate+'%','')}
+        ${kpi('Average Delay',avgDelay+' days','amber')}
+        ${kpi('Active Employees',active,'blue')}
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="ph"><h2>📊 Employee-wise Load</h2></div><canvas id="ch-emp" height="230"></canvas></div>
+        <div class="panel"><div class="ph"><h2>🥧 Status Breakdown</h2></div><canvas id="ch-status" height="230"></canvas></div>
+      </div>`);
+    drawCharts(tasks,marks,t);
+  },
+  async checklists(){
+    const admin=isAdmin();
+    const cs=await q('v_checklists', x=>x.eq('active',true).order('assignee_name').order('frequency'));
+    const ms=await q('v_checklist_marks', x=>x.order('due_date',{ascending:false}).limit(80));
+    let roster=admin?cs:cs.filter(c=>c.assignee_email===ME.email);
+    let marks =admin?ms:ms.filter(m=>m.assignee_email===ME.email);
+    if(admin&&CHK_FILTER){ roster=roster.filter(c=>c.assignee_email===CHK_FILTER); marks=marks.filter(m=>m.assignee_email===CHK_FILTER); }
+    let picker='';
+    if(admin){
+      const people=[...new Map(cs.map(c=>[c.assignee_email,c.assignee_name])).entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
+      picker=`<label class="lb">View checklist for</label>
+        <select class="inp" style="max-width:340px" onchange="setChkFilter(this.value)">
+          <option value="">All people (${cs.length})</option>
+          ${people.map(([em,nm])=>`<option value="${esc(em)}" ${CHK_FILTER===em?'selected':''}>${esc(nm)} (${cs.filter(c=>c.assignee_email===em).length})</option>`).join('')}
+        </select>`;
+    }
+    const picked=admin&&CHK_FILTER?(cs.find(c=>c.assignee_email===CHK_FILTER)||{}).assignee_name:'';
+    view(`${topbar('Checklists','Recurring duties & occurrences', admin?`<button class="btn green" onclick="addDuty()">＋ Add Duty</button>`:'')}
+      <div class="panel">${picker}
+        <div class="ph" style="margin-top:12px"><h2>${admin?(picked?esc(picked)+' — duties':'All duties'):'My duties'} (${roster.length})</h2></div>
+        ${roster.length?`<table><thead><tr><th>Duty</th>${admin?'<th>Assignee</th>':''}<th>Frequency</th><th>On miss</th><th>Next due</th>${admin?'<th></th>':''}</tr></thead><tbody>`+
+          roster.map(c=>`<tr><td>${esc(c.title)}</td>${admin?`<td>${esc(c.assignee_name)}</td>`:''}<td>${FREQ[c.frequency]||c.frequency}</td><td>${c.on_miss}</td><td>${fmt(c.next_due)}</td>${admin?`<td><button class="btn" onclick="doRetire('${c.id}')">Retire</button></td>`:''}</tr>`).join('')+`</tbody></table>`
+          :'<p style="color:var(--muted)">No duties.</p>'}
+      </div>
+      <div class="panel"><div class="ph"><h2>Recent Occurrences</h2></div>
+        ${marks.length?`<table><thead><tr><th>Duty</th>${admin?'<th>Assignee</th>':''}<th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>`+
+          marks.map(m=>`<tr><td>${esc(m.title)}</td>${admin?`<td>${esc(m.assignee_name)}</td>`:''}<td>${fmt(m.due_date)}</td><td>${markPill(m)}</td><td>${(['pending','overdue'].includes(m.status)&&m.assignee_email===ME.email)?`<button class="btn green" onclick="doMark('${m.id}')">✓</button>`:''}</td></tr>`).join('')+`</tbody></table>`
+          :'<p style="color:var(--muted)">Nothing yet.</p>'}
+      </div>`);
+  },
+  async capture(){
+    const cs=await q('v_capture', x=>x.in('status',['INBOX','SOMEDAY']).order('created_at',{ascending:false}));
+    view(`${topbar('Capture','Private to you. 🔒','')}
+      <div class="panel"><label class="lb">New note</label>
+        <textarea id="cp" class="inp" rows="2" placeholder="Anything on your mind…"></textarea>
+        <button class="btn green" style="margin-top:10px" onclick="doCap()">＋ Capture</button></div>
+      ${cs.map(c=>`<div class="panel" style="padding:14px"><div>${esc(c.content)}</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="capTask('${c.id}')">→ Task</button>
+          ${c.status!=='SOMEDAY'?`<button class="btn" onclick="capSet('${c.id}','SOMEDAY')">Someday</button>`:'<span class="pill open">SOMEDAY</span>'}
+          <button class="btn" onclick="capSet('${c.id}','DROPPED')">Drop</button></div></div>`).join('')||'<p style="color:var(--muted)">Nothing captured.</p>'}`);
+  },
+  async assign(){
+    view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'overview\')">← Back to Overview</button>')}
+      <div class="panel">
+        <div class="ph"><h2>📋 Task Assignment Form</h2></div>
+        <label class="lb">Employee</label>
+        <select id="as-who" class="inp" style="max-width:440px">${USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.full_name)}</option>`).join('')}</select>
+        <label class="lb" style="margin-top:16px">Tasks &amp; deadlines</label>
+        <div id="as-rows"></div>
+        <button class="btn" style="margin-top:10px" onclick="addRow()">＋ Add another task</button>
+        <div style="margin-top:18px"><button class="btn green" onclick="submitAssign()">Assign Task(s)</button></div>
+      </div>`);
+    ASSIGN_ROWS=0; $('#as-rows').innerHTML=''; addRow();
   }
 };
 
+function gaugeCard(r){
+  const p=Math.round((+r.overall||0)*100);
+  const c=p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
+  return `<div style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center">
+    <div class="gauge" style="margin:0 auto 10px;background:conic-gradient(${c} ${p*3.6}deg,#eef2f0 0)"><div class="inner">${p}%</div></div>
+    <div style="font-weight:700">${esc(r.full_name)}</div>
+    <div style="font-size:12px;color:var(--muted)">tasks ${r.task_score??'—'}/${r.tasks_due} · chk ${r.checklist_score??'—'}/${r.checklist_due}</div></div>`;
+}
+function drawCharts(tasks,marks,t){
+  if(typeof Chart==='undefined'){ toast('Charts library not loaded'); return; }
+  const load={};
+  tasks.filter(x=>x.status==='OPEN').forEach(x=>load[x.assignee_name]=(load[x.assignee_name]||0)+1);
+  marks.filter(m=>['pending','overdue','missed'].includes(m.status)).forEach(m=>load[m.assignee_name]=(load[m.assignee_name]||0)+1);
+  const ent=Object.entries(load).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  new Chart($('#ch-emp'),{type:'bar',data:{labels:ent.map(e=>e[0]),datasets:[{data:ent.map(e=>e[1]),backgroundColor:'#12395f',borderRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:9},maxRotation:60,minRotation:40}}}}});
+  const done=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE').length+marks.filter(m=>m.status==='done'||m.status==='done_late').length;
+  const pend=tasks.filter(x=>x.status==='OPEN'&&x.due_current>=t).length+marks.filter(m=>m.status==='pending').length;
+  const over=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t).length+marks.filter(m=>m.status==='overdue').length;
+  const miss=marks.filter(m=>m.status==='missed').length;
+  new Chart($('#ch-status'),{type:'doughnut',data:{labels:['Completed','Pending','Overdue','Missed'],datasets:[{data:[done,pend,over,miss],backgroundColor:['#15803d','#175cd3','#c9a227','#b42318']}]},options:{plugins:{legend:{position:'bottom'}}}});
+}
+
+// ---- overview / pending helpers ----
+function ovFilter(){ const term=$('#ov-q').value.toLowerCase(); const f=OV_TASKS.filter(x=>((x.assignee_name||'')+' '+(x.title||'')).toLowerCase().includes(term)); $('#ov-table').innerHTML=taskTable(f); }
+function pendFilter(){ const term=$('#emp-q').value.toLowerCase(); document.querySelectorAll('#emp-list .emprow').forEach(el=>{ el.style.display=el.textContent.toLowerCase().includes(term)?'':'none'; }); }
+function pendSel(email){ const e=PEND[email]; if(!e)return; const t=today();
+  $('#emp-detail').innerHTML=`<div class="ph"><h2>${esc(e.name||email)} · ${e.items.length} pending</h2>
+     <button class="wa push" onclick="waRemind('${esc(email)}','${esc(e.name||'')}',${e.items.length})">🟢</button></div>
+   <table><thead><tr><th>Task ID</th><th>Task</th><th>Plan</th><th>Deadline</th><th>Status</th></tr></thead><tbody>${
+     e.items.slice().sort((a,b)=>a.due_current<b.due_current?-1:1).map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td><td>${esc(x.title)}</td><td>${fmt(x.due_original)}</td><td>${fmt(x.due_current)}</td><td>${taskStatus(x)}</td></tr>`).join('')
+   }</tbody></table>`;
+}
+function waRemind(email,name,n){
+  const ph=PHONES[email];
+  if(!ph){ toast('No WhatsApp number on file for '+(name||email)+' — add numbers to enable reminders'); return; }
+  const msg=encodeURIComponent(`Hi ${name}, you have ${n} pending task(s) in KSK ERP. Please update your status.`);
+  window.open(`https://wa.me/${ph}?text=${msg}`,'_blank');
+}
+
+// ---- assign helpers ----
+function addRow(){ const d=document.createElement('div'); d.style='display:grid;grid-template-columns:1fr 170px auto;gap:8px;margin-top:8px';
+  d.innerHTML=`<input class="inp as-desc" placeholder="Task description…" style="margin-top:0"><input type="date" class="inp as-date" value="${today()}" style="margin-top:0"><button class="btn" onclick="this.parentNode.remove()">✕</button>`;
+  $('#as-rows').appendChild(d); ASSIGN_ROWS++; }
+async function submitAssign(){
+  const who=$('#as-who').value;
+  const descs=[...document.querySelectorAll('.as-desc')], dates=[...document.querySelectorAll('.as-date')];
+  let n=0; for(let i=0;i<descs.length;i++){ const t=descs[i].value.trim(); if(!t)continue; await rpc('task_create',{p_title:t,p_detail:null,p_assignee_email:who,p_due:dates[i].value}); n++; }
+  if(!n)return toast('Add at least one task'); toast(n+' task(s) assigned'); await refreshBadges(); go('overview');
+}
+
 // ---- actions (every write goes through a guarded RPC) ----
-async function createTask(){ const t=$('#nt-title').value; if(!t.trim())return toast('Title required');
-  const n = await rpc('task_create',{p_title:t,p_detail:$('#nt-detail').value||null,p_assignee_email:$('#nt-who').value,p_due:$('#nt-due').value});
-  toast('Created '+n); render.del(); }
-async function done(id){ await rpc('task_done',{p_task_id:id}); toast('Done ✓'); render[TAB](); }
-async function progress(id){ ask('Progress note (deadline untouched):','e.g. Step 1 complete, vendor call Monday', async v=>{ await rpc('task_progress',{p_task_id:id,p_note:v}); toast('Noted'); }); }
-async function revise(id){ ask('New date + reason (recorded forever):','Reason for moving the deadline…', async (v,d)=>{ await rpc('task_revise',{p_task_id:id,p_new_due:d,p_reason:v}); toast('Date moved — reason logged'); render[TAB](); }, true); }
-async function cancel(id){ ask('Reason for cancelling:','', async v=>{ await rpc('task_cancel',{p_task_id:id,p_reason:v}); toast('Cancelled (archived)'); render[TAB](); }); }
-async function capAdd(){ const v=$('#cp').value; if(!v.trim())return; await rpc('capture_add',{p_content:v}); render.cap(); }
-async function capSet(id,s){ await rpc('capture_set',{p_id:id,p_status:s}); render.cap(); }
-async function capTask(id){ ask('Assign to (email) — or leave as yours:', ME.email, async (v,d)=>{ const n=await rpc('capture_to_task',{p_id:id,p_assignee_email:v||ME.email,p_due:d}); toast('Created '+n); render.cap(); }, true); }
+async function doDone(id){ await rpc('task_done',{p_task_id:id}); toast('Done ✓'); await refreshBadges(); render[TAB](); }
+async function doMark(id){ await rpc('checklist_mark',{p_mark_id:id}); toast('Marked ✓'); await refreshBadges(); render[TAB](); }
+function doRevise(id){ dlg(`<div class="ph"><h2>Move deadline</h2></div>
+  <label class="lb">New date</label><input id="rv-d" type="date" class="inp" value="${today()}">
+  <label class="lb">Reason (recorded forever)</label><textarea id="rv-r" class="inp" rows="2" placeholder="Why is the deadline moving?"></textarea>
+  <div style="margin-top:14px;display:flex;gap:8px"><button class="btn green" onclick="doReviseGo('${id}')">Save</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`); }
+async function doReviseGo(id){ const d=$('#rv-d').value, r=$('#rv-r').value; if(r.trim().length<5)return toast('Reason needed (≥5 chars)');
+  await rpc('task_revise',{p_task_id:id,p_new_due:d,p_reason:r}); toast('Date moved — reason logged'); closeDlg(); render[TAB](); }
+function doRetire(id){ if(!confirm('Retire this duty? It stops recurring and pending marks are withdrawn. History is kept.'))return;
+  rpc('checklist_retire',{p_checklist_id:id}).then(()=>{ toast('Retired'); render.checklists(); }); }
+function addDuty(){ dlg(`<div class="ph"><h2>New Duty</h2></div>
+  <label class="lb">Duty</label><input id="ck-title" class="inp" placeholder="e.g. Daily production report">
+  <label class="lb">Assignee</label><select id="ck-who" class="inp">${USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.full_name)}</option>`).join('')}</select>
+  <label class="lb">Frequency</label><select id="ck-freq" class="inp">${Object.entries(FREQ).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+  <label class="lb">If missed</label><select id="ck-miss" class="inp"><option value="lapse">lapse — record &amp; move on</option><option value="carry">carry — stays owed</option></select>
+  <div style="margin-top:16px;display:flex;gap:8px"><button class="btn green" onclick="ckCreate()">Create</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`); }
 async function ckCreate(){ const t=$('#ck-title').value; if(!t.trim())return toast('Title required');
   await rpc('checklist_create',{p_title:t,p_assignee_email:$('#ck-who').value,p_freq:$('#ck-freq').value,p_on_miss:$('#ck-miss').value});
-  await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); render.chk(); }
-async function mark(id){ await rpc('checklist_mark',{p_mark_id:id}); toast('Marked ✓'); render[TAB](); }
-async function ckRetire(id){ if(!confirm('Retire this duty? It stops recurring and pending marks are withdrawn. History is kept.')) return;
-  await rpc('checklist_retire',{p_checklist_id:id}); toast('Retired'); render.chk(); }
-async function history_(id){ const rs = await q('v_task_revisions', x=>x.eq('task_id',id).order('changed_at'));
-  $('#dlg').innerHTML = `<div class="t-title">Deadline history</div>` +
-    rs.map(r=>`<p class="t-sub" style="margin-top:8px"><b>${fmt(r.old_due)} → ${fmt(r.new_due)}</b> · ${esc(r.changed_by_name)}<br>${esc(r.reason)}</p>`).join('') +
-    `<button class="a" style="margin-top:12px" onclick="dlg.close()">Close</button>`;
-  $('#dlg').showModal(); }
-function ask(title, ph, cb, withDate){
-  $('#dlg').innerHTML = `<div class="t-title">${title}</div>
-    <textarea id="dlg-v" rows="2" placeholder="${esc(ph)}">${withDate&&ph.includes('@')?esc(ph):''}</textarea>
-    ${withDate?`<label>Date</label><input id="dlg-d" type="date" value="${today()}">`:''}
-    <div class="row" style="margin-top:12px"><button class="a gold grow" id="dlg-ok">OK</button>
-    <button class="a" onclick="dlg.close()">Cancel</button></div>`;
-  $('#dlg-ok').onclick = async ()=>{ await cb($('#dlg-v').value, withDate?$('#dlg-d').value:null); $('#dlg').close(); };
-  $('#dlg').showModal();
+  await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); closeDlg(); CHK_FILTER=''; render.checklists(); }
+function setChkFilter(v){ CHK_FILTER=v; render.checklists(); }
+async function doCap(){ const v=$('#cp').value; if(!v.trim())return; await rpc('capture_add',{p_content:v}); render.capture(); }
+async function capSet(id,s){ await rpc('capture_set',{p_id:id,p_status:s}); render.capture(); }
+function capTask(id){ dlg(`<div class="ph"><h2>Capture → Task</h2></div>
+  <label class="lb">Assign to</label><select id="ct-who" class="inp">${USERS.map(u=>`<option value="${esc(u.email)}" ${u.email===ME.email?'selected':''}>${esc(u.full_name)}</option>`).join('')}</select>
+  <label class="lb">Due</label><input id="ct-d" type="date" class="inp" value="${today()}">
+  <div style="margin-top:14px;display:flex;gap:8px"><button class="btn green" onclick="capTaskGo('${id}')">Create task</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`); }
+async function capTaskGo(id){ const w=$('#ct-who').value,d=$('#ct-d').value; const n=await rpc('capture_to_task',{p_id:id,p_assignee_email:w,p_due:d}); toast('Created '+n); closeDlg(); render.capture(); }
+
+async function refreshBadges(){
+  const ts=await q('v_tasks', x=>x.eq('status','OPEN'));
+  BADGE.pending=ts.length;
+  BADGE.mytasks=ts.filter(t=>t.assignee_email===ME.email).length;
+  const ms=await q('v_checklist_marks', x=>x.in('status',['pending','overdue']).lte('due_date',today()));
+  BADGE.checklists=ms.filter(m=>m.assignee_email===ME.email).length;
 }
 
 // ---- boot ----
-(async ()=>{
-  const {data:{session}} = await sb.auth.getSession();
-  if(!session){ location.href = './index.html'; return; }
-  const {data,error} = await sb.rpc('my_profile');
-  if(error || !data?.length){ location.href = './index.html'; return; }
-  ME = data[0];
-  $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
-  USERS = await q('v_users', x=>x.order('full_name'));
-  drawNav(); render.my();
+(async()=>{
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){ location.href='./index.html'; return; }
+  const {data,error}=await sb.rpc('my_profile');
+  if(error||!data?.length){ location.href='./index.html'; return; }
+  ME=data[0];
+  USERS=await q('v_users', x=>x.order('full_name'));
+  await refreshBadges();
+  drawShell(); go('overview');
 })();
 </script>
 </body>
