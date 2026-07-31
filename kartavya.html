@@ -107,7 +107,17 @@ const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 
 let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
 let OV_TASKS=[], PEND={}, BADGE={pending:0,mytasks:0,checklists:0};
-const PHONES = {}; // email -> intl number (digits only). Empty until numbers are added; enables WhatsApp reminders.
+const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
+  'ea@kskenggind.com':'916290154899',
+  'accounts@kskenggind.com':'919300240411',
+  'bla@kskenggind.com':'917566444000',
+  'engineering@kskenggind.com':'919009109379',
+  'mmore@kskenggind.com':'919831701197',
+  'pkbehera@kskenggind.com':'919338123830',
+  'rrampuria@kskenggind.com':'919989022011',
+  'rsingh@kskenggind.com':'918962747160',
+  'vagarwal@kskenggind.com':'919830058119'
+};
 const FREQ={D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly',H:'Half-yearly',Y:'Yearly'};
 
 const $=s=>document.querySelector(s);
