@@ -150,6 +150,14 @@ function drawShell(){
    <aside class="sidebar">
      <div class="brand"><div class="logo">Kartav<span>ya</span></div><div class="sub">KSK ERP 1.0 · Accountability</div></div>
      <div class="navsec"><div class="h">MAIN</div><div id="nav"></div></div>
+     <div class="navsec"><div class="h">MODULES</div>
+       <a class="navitem" href="./index.html"><span class="ic">▤</span><span class="lbl">Dashboard</span></a>
+       <a class="navitem" href="./orders.html"><span class="ic">▦</span><span class="lbl">Orders</span></a>
+       <a class="navitem" href="./sales.html"><span class="ic">₹</span><span class="lbl">Sales</span></a>
+       <a class="navitem" href="./production.html"><span class="ic">⚙</span><span class="lbl">Production</span></a>
+       <a class="navitem" href="./masters.html"><span class="ic">☰</span><span class="lbl">Masters</span></a>
+       <div class="navitem on"><span class="ic">✓</span><span class="lbl">Kartavya</span></div>
+     </div>
      <div class="spacer"></div>
      <div class="usercard"><div class="avatar">${initials(ME.full_name)}</div><div><div class="nm">${esc(ME.full_name.split(' ')[0])}</div><div class="rl">${esc(ME.role)}</div></div></div>
      <button class="signout" onclick="location.href='./index.html'">← Back to Portal</button>

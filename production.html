@@ -69,9 +69,60 @@
   #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
   dialog { border:0; border-radius:14px; padding:18px; width:min(94vw,480px); max-height:88vh; }
   dialog::backdrop { background:rgba(15,36,64,.5); }
+
+/* ===================== KSK DESKTOP SHELL (added 2026-08-06) ===================== */
+:root{ --ksk-sbw:238px; }
+#ksk-hamb{ display:none; }
+.ksk-sb{ position:fixed; top:0; left:0; bottom:0; width:var(--ksk-sbw);
+  background:linear-gradient(180deg,#12395f,#0d2a47); color:#cdd9e6;
+  display:flex; flex-direction:column; z-index:200;
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif; }
+.ksk-sb .bnd{ padding:15px 18px; display:flex; align-items:baseline; gap:9px; border-bottom:1px solid rgba(255,255,255,.08); }
+.ksk-sb .bnd .lg{ background:#c9a227; color:#0d2a47; font-weight:800; font-size:15px; padding:4px 8px; border-radius:3px; letter-spacing:.5px; }
+.ksk-sb .bnd .tx{ font-size:10px; letter-spacing:2px; color:#8ba0b6; text-transform:uppercase; }
+.ksk-sb .nv{ display:flex; flex-direction:column; padding:10px 12px; gap:2px; }
+.ksk-sb .nv-a{ display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:8px;
+  color:#cdd9e6; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
+.ksk-sb .nv-a:hover{ background:rgba(255,255,255,.07); color:#fff; }
+.ksk-sb .nv-a.on{ background:rgba(201,162,39,.18); color:#fff; box-shadow:inset 3px 0 0 #c9a227; }
+.ksk-sb .nv-a .ic{ width:18px; text-align:center; opacity:.9; font-size:15px; }
+.ksk-sb .foot{ margin-top:auto; padding:12px 16px; font-size:10.5px; line-height:1.4; color:#7f93a8; border-top:1px solid rgba(255,255,255,.08); }
+@media(min-width:901px){
+  body{ padding-left:var(--ksk-sbw); }
+  header{ padding-left:22px !important; }
+  main{ max-width:1500px !important; margin:0 auto !important; padding:20px 30px !important; }
+  main .t-title{ font-size:15px; }
+  .kpi{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) !important; }
+  .kpi b{ font-size:24px !important; }
+  #dlist,#rlist,#reglist,#enqlist,#qtnlist,#clist,#ilist{
+     display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:12px; align-items:start; }
+  #dlist>p,#rlist>p,#reglist>p,#enqlist>p,#qtnlist>p,#clist>p,#ilist>p{ grid-column:1 / -1; }
+  main table{ font-size:13.5px; }
+}
+@media(max-width:900px){
+  .ksk-sb{ transform:translateX(-100%); transition:transform .25s; width:252px; }
+  body.ksk-nav-open .ksk-sb{ transform:none; }
+  #ksk-hamb{ display:flex; position:fixed; top:9px; left:9px; z-index:201; width:38px; height:38px;
+    align-items:center; justify-content:center; background:#0d2a47; color:#fff; border:0; border-radius:8px; font-size:18px; cursor:pointer; }
+  header{ padding-left:56px !important; }
+}
 </style>
 </head>
 <body>
+<button id="ksk-hamb" onclick="document.body.classList.toggle('ksk-nav-open')">☰</button>
+<aside class="ksk-sb">
+  <div class="bnd"><span class="lg">KSK</span><span class="tx">ERP 1.0</span></div>
+  <nav class="nv">
+    <a class="nv-a" href="./index.html"><span class="ic">▤</span><span>Dashboard</span></a>
+    <a class="nv-a" href="./orders.html"><span class="ic">▦</span><span>Orders</span></a>
+    <a class="nv-a" href="./sales.html"><span class="ic">₹</span><span>Sales</span></a>
+    <a class="nv-a on" href="./production.html"><span class="ic">⚙</span><span>Production</span></a>
+    <a class="nv-a" href="./masters.html"><span class="ic">☰</span><span>Masters</span></a>
+    <a class="nv-a" href="./kartavya.html"><span class="ic">✓</span><span>Kartavya</span></a>
+  </nav>
+  <div class="foot">KSK Engineering Industries Pvt. Ltd.</div>
+</aside>
+
 <header>
   <a href="./index.html">←</a>
   <h1>Production <small>Mill output &amp; material receipts · KSK ERP 1.0</small></h1>
