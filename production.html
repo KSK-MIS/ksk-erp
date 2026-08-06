@@ -73,6 +73,7 @@
 /* ===================== KSK DESKTOP SHELL (added 2026-08-06) ===================== */
 :root{ --ksk-sbw:238px; }
 #ksk-hamb{ display:none; }
+@media(min-width:901px){ html{ background:linear-gradient(to right,#0d2a47 var(--ksk-sbw), #f4f6f9 var(--ksk-sbw)) fixed; } } /* ksk-antiflash */
 .ksk-sb{ position:fixed; top:0; left:0; bottom:0; width:var(--ksk-sbw);
   background:linear-gradient(180deg,#12395f,#0d2a47); color:#cdd9e6;
   display:flex; flex-direction:column; z-index:200;
@@ -80,7 +81,7 @@
 .ksk-sb .bnd{ padding:15px 18px; display:flex; align-items:baseline; gap:9px; border-bottom:1px solid rgba(255,255,255,.08); }
 .ksk-sb .bnd .lg{ background:#c9a227; color:#0d2a47; font-weight:800; font-size:15px; padding:4px 8px; border-radius:3px; letter-spacing:.5px; }
 .ksk-sb .bnd .tx{ font-size:10px; letter-spacing:2px; color:#8ba0b6; text-transform:uppercase; }
-.ksk-sb .nv{ display:flex; flex-direction:column; padding:10px 12px; gap:2px; }
+.ksk-sb .nv{ display:flex; flex-direction:column; padding:10px 12px; gap:2px; background:transparent; position:static; top:auto; overflow:visible; border:0; box-shadow:none; }
 .ksk-sb .nv-a{ display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:8px;
   color:#cdd9e6; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
 .ksk-sb .nv-a:hover{ background:rgba(255,255,255,.07); color:#fff; }
