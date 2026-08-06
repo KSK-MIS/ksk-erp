@@ -107,6 +107,21 @@
     align-items:center; justify-content:center; background:#0d2a47; color:#fff; border:0; border-radius:8px; font-size:18px; cursor:pointer; }
   header{ padding-left:56px !important; }
 }
+/* ===================== KSK DENSE SORTABLE TABLES ===================== */
+.tblwrap{ background:#fff; border:1px solid #e2e7ee; border-radius:10px; overflow:auto; max-height:calc(100vh - 250px); margin-bottom:14px; box-shadow:0 1px 3px rgba(15,36,64,.06); }
+table.dtbl{ width:100%; border-collapse:collapse; font-size:13px; }
+table.dtbl thead th{ position:sticky; top:0; background:#eef2f7; color:#3a4a5e; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; text-align:left; padding:9px 12px; border-bottom:2px solid #d6dee8; white-space:nowrap; z-index:1; user-select:none; }
+table.dtbl thead th.n{ text-align:right; }
+table.dtbl thead th:hover{ background:#e4eaf2; }
+table.dtbl tbody td{ padding:8px 12px; border-bottom:1px solid #f0f3f7; white-space:nowrap; vertical-align:middle; color:#233; }
+table.dtbl tbody td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+table.dtbl tbody tr:nth-child(even){ background:#fafbfd; }
+table.dtbl tbody tr.rowc{ cursor:pointer; }
+table.dtbl tbody tr.rowc:hover{ background:#eef4fb; }
+table.dtbl .sarr{ color:#c9a227; font-size:10px; }
+table.dtbl td .s2{ display:block; color:#889; font-size:11px; font-weight:400; margin-top:1px; white-space:normal; }
+table.dtbl td.wrap{ white-space:normal; min-width:200px; }
+table.dtbl td b{ color:#182b45; }
 </style>
 </head>
 <body>
@@ -155,6 +170,30 @@ async function rpc(fn,args){ const {data,error}=await sb.rpc(fn,args); if(error)
 async function q(v,mod){ let x=sb.from(v).select('*'); if(mod) x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
 const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
 const LABEL = {PRODUCTION:'Production',LAY_OFF:'Lay off',WEEKLY_OFF:'Weekly off',NO_PRODUCTION:'No production',UNKNOWN:'Not recorded'};
+
+/* ===== KSK sortable dense-table engine ===== */
+const KSKT={};
+function kskDraw(id){
+  const t=KSKT[id]; if(!t)return; const tb=document.querySelector('#'+id+' tbody'); if(!tb)return;
+  let rows=t.rows.slice(); const sc=t.cols[t.sort.col];
+  if(sc){ rows.sort((a,b)=>{
+    let x=sc.sort?sc.sort(a):(sc.get?sc.get(a):''), y=sc.sort?sc.sort(b):(sc.get?sc.get(b):'');
+    if(sc.num){ x=(x==null||x==='')?-Infinity:Number(x); y=(y==null||y==='')?-Infinity:Number(y); return (x-y)*t.sort.dir; }
+    return String(x==null?'':x).localeCompare(String(y==null?'':y),undefined,{numeric:true})*t.sort.dir;
+  }); }
+  tb.innerHTML = rows.length ? rows.map(r=>{
+    const oc=t.onRow?` class="rowc" onclick="${t.onRow(r)}"`:'';
+    return '<tr'+oc+'>'+t.cols.map(c=>`<td class="${c.num?'n':''} ${c.cls?c.cls(r):''}">${c.cell?c.cell(r):esc(c.get?c.get(r):'')}</td>`).join('')+'</tr>';
+  }).join('') : `<tr><td colspan="${t.cols.length}" style="text-align:center;color:#889;padding:16px">Nothing to show.</td></tr>`;
+  t.cols.forEach((c,i)=>{ const s=document.querySelector('#'+id+' th[data-c="'+i+'"] .sarr'); if(s) s.textContent=t.sort.col===i?(t.sort.dir>0?'▲':'▼'):''; });
+}
+function kskSortBy(id,i){ const t=KSKT[id]; if(!t||t.cols[i].noSort)return; if(t.sort.col===i)t.sort.dir*=-1; else{t.sort.col=i;t.sort.dir=t.cols[i].num?-1:1;} kskDraw(id); }
+function kskTable(id,cols,rows,opts){
+  opts=opts||{}; KSKT[id]={cols,rows,onRow:opts.onRow,sort:{col:(opts.sortCol==null?-1:opts.sortCol),dir:opts.sortDir||1}};
+  const head=cols.map((c,i)=>`<th data-c="${i}" class="${c.num?'n':''}" ${c.noSort?'':`onclick="kskSortBy('${id}',${i})" style="cursor:pointer"`} title="${c.noSort?'':'Click to sort'}">${esc(c.label)} <span class="sarr"></span></th>`).join('');
+  setTimeout(()=>kskDraw(id),0);
+  return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
+}
 
 const TABS=[['daily','Daily'],['prod','Products'],['recv','Receipts'],['sup','Suppliers']];
 function drawNav(){ $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join(''); }
@@ -216,17 +255,21 @@ function dDraw(){
     : DF==='review' ? d.needs_review : true;
   ['all','prod','off','review'].forEach(k=>$('#d-'+k)?.classList.remove('dark'));
   $('#d-'+DF)?.classList.add('dark');
-  const list = DAYS.filter(pass).slice().sort((a,b)=>b.prod_date.localeCompare(a.prod_date));
-  $('#dlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${DAYS.length} days</p>` +
-    (list.length ? list.map(d=>`<div class="card" style="padding:11px 14px;cursor:pointer" onclick="dayDlg('${d.prod_date}')">
-      <div class="row">
-        <div class="grow"><div class="t-title">${fmt(d.prod_date)}${d.needs_review?' <span class="tag review">CHECK</span>':''}</div>
-          <div class="t-sub">${d.status==='PRODUCTION' ? esc(d.product_name||'—') : LABEL[d.status]}</div></div>
-        <div style="text-align:right">
-          <div class="t-title">${d.status==='PRODUCTION'?mt(d.qty_mt):'—'}</div>
-          <span class="tag ${d.status}">${LABEL[d.status]}</span></div>
-      </div></div>`).join('')
-    : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+  const list = DAYS.filter(pass);
+  const nf = (v,dp)=> v==null ? '—' : Number(v).toLocaleString('en-IN',{maximumFractionDigits:dp});
+  const cols=[
+    {label:'Date', sort:d=>d.prod_date, cell:d=>fmt(d.prod_date)},
+    {label:'Status', get:d=>d.status, cell:d=>`<span class="tag ${d.status}">${LABEL[d.status]}</span>${d.needs_review?' <span class="tag review">CHECK</span>':''}`},
+    {label:'Product', cls:()=>'wrap', get:d=>d.product_name||LABEL[d.status],
+      cell:d=>d.status==='PRODUCTION'?esc(d.product_name||'—'):`<span class="muted">${LABEL[d.status]}</span>`},
+    {label:'Drawing', get:d=>d.drawing_no||'', cell:d=>esc(d.drawing_no||'—')},
+    {label:'Output MT', num:true, get:d=>d.status==='PRODUCTION'?Number(d.qty_mt||0):-1,
+      cell:d=>d.status==='PRODUCTION'?`<b>${nf(d.qty_mt,3)}</b>`:'—'},
+    {label:'Campaign MT', num:true, get:d=>d.cum_campaign_mt, cell:d=>nf(d.cum_campaign_mt,2)},
+    {label:'Year to date', num:true, get:d=>d.cum_fy_mt, cell:d=>nf(d.cum_fy_mt,2)}
+  ];
+  $('#dlist').innerHTML = `<p class="muted" style="margin:8px 4px">Showing ${list.length} of ${DAYS.length} days · click a column to sort</p>` +
+    kskTable('t-days', cols, list, {onRow:d=>`dayDlg('${d.prod_date}')`, sortCol:0, sortDir:-1});
 }
 render.daily = async () => {
   $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
@@ -293,18 +336,19 @@ render.daily = async () => {
 render.prod = async () => {
   $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
   if(!PRODS.length) PRODS = await q('v_production_by_product');
-  const list = PRODS.slice().sort((a,b)=>Number(b.total_mt)-Number(a.total_mt));
-  const max = Math.max(...list.map(p=>Number(p.total_mt)),1);
-  $('#main').innerHTML = `
-    <p class="muted" style="margin:0 4px 10px">The mill runs one product at a time, in campaigns. These are the campaigns since 1 April, biggest first.</p>
-    ${list.map(p=>`<div class="card">
-      <div class="row"><div class="grow">
-        <div class="t-title">${esc(p.product_name)}</div>
-        <div class="t-sub">${p.days} day${p.days>1?'s':''} · ${fmt(p.first_day)} → ${fmt(p.last_day)} · avg ${Number(p.avg_day_mt).toFixed(1)} MT/day</div>
-        ${p.drawing_no?`<div class="t-sub" style="color:#334">▸ Drawing ${esc(p.drawing_no)}</div>`:'<div class="t-sub" style="color:#a96b00">▸ No drawing number in the sheet</div>'}
-      </div><div style="text-align:right"><div class="t-title">${Number(p.total_mt).toFixed(1)} MT</div></div></div>
-      <div class="mbar" style="margin-top:8px"><i style="width:${100*Number(p.total_mt)/max}%"></i></div>
-    </div>`).join('')}`;
+  const nf=(v,dp)=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:dp});
+  const cols=[
+    {label:'Product', cls:()=>'wrap', get:p=>p.product_name,
+      cell:p=>`${esc(p.product_name)}${p.drawing_no?'':'<span class="s2" style="color:#a96b00">no drawing in sheet</span>'}`},
+    {label:'Drawing', get:p=>p.drawing_no||'', cell:p=>esc(p.drawing_no||'—')},
+    {label:'Days', num:true, get:p=>p.days},
+    {label:'First', sort:p=>p.first_day, cell:p=>fmt(p.first_day)},
+    {label:'Last', sort:p=>p.last_day, cell:p=>fmt(p.last_day)},
+    {label:'Avg MT/day', num:true, get:p=>p.avg_day_mt, cell:p=>nf(p.avg_day_mt,1)},
+    {label:'Total MT', num:true, get:p=>p.total_mt, cell:p=>`<b>${nf(p.total_mt,1)}</b>`}
+  ];
+  $('#main').innerHTML = `<p class="muted" style="margin:0 4px 10px">The mill runs one product at a time, in campaigns since 1 April. Click a column to sort.</p>` +
+    kskTable('t-prod', cols, PRODS, {sortCol:6, sortDir:-1});
 };
 
 // ================= RECEIPTS =================
@@ -318,19 +362,21 @@ function rDraw(){
   ['all','nopo','mt'].forEach(k=>$('#r-'+k)?.classList.remove('dark'));
   $('#r-'+RF)?.classList.add('dark');
   const list = RECV.filter(r=>hit(r)&&pass(r));
-  $('#rlist').innerHTML = `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${RECV.length}</p>` +
-    (list.length ? list.map(r=>`<div class="card">
-      <div class="row"><div class="grow">
-        <div class="t-title">${esc(r.material||'—')}</div>
-        <div class="t-sub">${esc(r.supplier||'—')}</div>
-        <div class="t-sub">${fmt(r.recv_date)} · ${num(r.qty)} ${esc(r.uom||'')}${r.consignee&&r.consignee!=='KSK'?' · to '+esc(r.consignee):''}</div>
-        <div class="t-sub" style="color:${r.no_written_po?'#a96b00':'#334'}">▸ ${r.no_written_po?`no written PO — “${esc(r.order_ref||'')}”`:esc(r.order_ref||'—')}</div>
-      </div>
-      ${isAdmin()?`<div style="text-align:right">
-        <div class="t-title">${r.value!=null?cr(r.value):'—'}</div>
-        <div class="t-sub">${r.rate!=null?'@ '+cr(r.rate):esc(r.rate_raw||'')}</div></div>`:''}
-      </div></div>`).join('')
-    : '<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+  const cols=[
+    {label:'Date', sort:r=>r.recv_date, cell:r=>fmt(r.recv_date)},
+    {label:'Material', cls:()=>'wrap', get:r=>r.material,
+      cell:r=>`${esc(r.material||'—')}${r.consignee&&r.consignee!=='KSK'?`<span class="s2">→ ${esc(r.consignee)}</span>`:''}`},
+    {label:'Supplier', cls:()=>'wrap', get:r=>r.supplier, cell:r=>esc(r.supplier||'—')},
+    {label:'Qty', num:true, get:r=>r.qty, cell:r=>`${num(r.qty)} <span class="muted">${esc(r.uom||'')}</span>`},
+    {label:'Order ref', cls:()=>'wrap', get:r=>r.order_ref||'',
+      cell:r=>r.no_written_po?`<span class="tag" style="background:#fff3d6;color:#a96b00">no PO</span> ${esc(r.order_ref||'')}`:esc(r.order_ref||'—')}
+  ];
+  if(isAdmin()){
+    cols.push({label:'Value', num:true, get:r=>r.value, cell:r=>r.value!=null?cr(r.value):'—'});
+    cols.push({label:'Rate', num:true, get:r=>r.rate, cell:r=>r.rate!=null?cr(r.rate):esc(r.rate_raw||'—')});
+  }
+  $('#rlist').innerHTML = `<p class="muted" style="margin:8px 4px">Showing ${list.length} of ${RECV.length} · click a column to sort</p>` +
+    kskTable('t-recv', cols, list, {sortCol:0, sortDir:-1});
 }
 render.recv = async () => {
   $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
@@ -361,16 +407,16 @@ render.recv = async () => {
 render.sup = async () => {
   $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
   if(!SUPP.length) SUPP = await q('v_receipts_by_supplier');
-  const list = SUPP.slice().sort((a,b)=>(Number(b.value)||0)-(Number(a.value)||0) || b.receipts-a.receipts);
-  $('#main').innerHTML = `
-    <p class="muted" style="margin:0 4px 10px">One row per supplier name as written in the Factory Report. Names are not yet mastered — the same supplier spelled two ways appears twice.</p>
-    ${list.map(s=>`<div class="card"><div class="row">
-      <div class="grow"><div class="t-title">${esc(s.supplier||'—')}</div>
-        <div class="t-sub">${s.receipts} receipt${s.receipts>1?'s':''} · ${fmt(s.first_recv)} → ${fmt(s.last_recv)}</div>
-        ${s.without_po?`<div class="t-sub" style="color:#a96b00">▸ ${s.without_po} without a written PO</div>`:''}
-      </div>
-      ${isAdmin()&&s.value!=null?`<div style="text-align:right"><div class="t-title">${cr(s.value)}</div></div>`:''}
-    </div></div>`).join('')}`;
+  const cols=[
+    {label:'Supplier', cls:()=>'wrap', get:s=>s.supplier, cell:s=>esc(s.supplier||'—')},
+    {label:'Receipts', num:true, get:s=>s.receipts},
+    {label:'First', sort:s=>s.first_recv, cell:s=>fmt(s.first_recv)},
+    {label:'Last', sort:s=>s.last_recv, cell:s=>fmt(s.last_recv)},
+    {label:'Without PO', num:true, get:s=>s.without_po||0, cell:s=>s.without_po?`<span class="tag" style="background:#fff3d6;color:#a96b00">${s.without_po}</span>`:'—'}
+  ];
+  if(isAdmin()) cols.push({label:'Value', num:true, get:s=>s.value, cell:s=>s.value!=null?cr(s.value):'—'});
+  $('#main').innerHTML = `<p class="muted" style="margin:0 4px 10px">One row per supplier name as written in the Factory Report — names are not yet mastered, so the same supplier spelled two ways appears twice. Click a column to sort.</p>` +
+    kskTable('t-sup', cols, SUPP, {sortCol:isAdmin()?5:1, sortDir:-1});
 };
 
 // ---- boot ----

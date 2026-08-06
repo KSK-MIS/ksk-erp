@@ -92,6 +92,21 @@
     align-items:center; justify-content:center; background:#0d2a47; color:#fff; border:0; border-radius:8px; font-size:18px; cursor:pointer; }
   header{ padding-left:56px !important; }
 }
+/* ===================== KSK DENSE SORTABLE TABLES ===================== */
+.tblwrap{ background:#fff; border:1px solid #e2e7ee; border-radius:10px; overflow:auto; max-height:calc(100vh - 250px); margin-bottom:14px; box-shadow:0 1px 3px rgba(15,36,64,.06); }
+table.dtbl{ width:100%; border-collapse:collapse; font-size:13px; }
+table.dtbl thead th{ position:sticky; top:0; background:#eef2f7; color:#3a4a5e; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; text-align:left; padding:9px 12px; border-bottom:2px solid #d6dee8; white-space:nowrap; z-index:1; user-select:none; }
+table.dtbl thead th.n{ text-align:right; }
+table.dtbl thead th:hover{ background:#e4eaf2; }
+table.dtbl tbody td{ padding:8px 12px; border-bottom:1px solid #f0f3f7; white-space:nowrap; vertical-align:middle; color:#233; }
+table.dtbl tbody td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+table.dtbl tbody tr:nth-child(even){ background:#fafbfd; }
+table.dtbl tbody tr.rowc{ cursor:pointer; }
+table.dtbl tbody tr.rowc:hover{ background:#eef4fb; }
+table.dtbl .sarr{ color:#c9a227; font-size:10px; }
+table.dtbl td .s2{ display:block; color:#889; font-size:11px; font-weight:400; margin-top:1px; white-space:normal; }
+table.dtbl td.wrap{ white-space:normal; min-width:200px; }
+table.dtbl td b{ color:#182b45; }
 </style>
 </head>
 <body>
@@ -135,6 +150,30 @@ async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(err
 async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
 const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
 
+/* ===== KSK sortable dense-table engine ===== */
+const KSKT={};
+function kskDraw(id){
+  const t=KSKT[id]; if(!t)return; const tb=document.querySelector('#'+id+' tbody'); if(!tb)return;
+  let rows=t.rows.slice(); const sc=t.cols[t.sort.col];
+  if(sc){ rows.sort((a,b)=>{
+    let x=sc.sort?sc.sort(a):(sc.get?sc.get(a):''), y=sc.sort?sc.sort(b):(sc.get?sc.get(b):'');
+    if(sc.num){ x=(x==null||x==='')?-Infinity:Number(x); y=(y==null||y==='')?-Infinity:Number(y); return (x-y)*t.sort.dir; }
+    return String(x==null?'':x).localeCompare(String(y==null?'':y),undefined,{numeric:true})*t.sort.dir;
+  }); }
+  tb.innerHTML = rows.length ? rows.map(r=>{
+    const oc=t.onRow?` class="rowc" onclick="${t.onRow(r)}"`:'';
+    return '<tr'+oc+'>'+t.cols.map(c=>`<td class="${c.num?'n':''} ${c.cls?c.cls(r):''}">${c.cell?c.cell(r):esc(c.get?c.get(r):'')}</td>`).join('')+'</tr>';
+  }).join('') : `<tr><td colspan="${t.cols.length}" style="text-align:center;color:#889;padding:16px">Nothing to show.</td></tr>`;
+  t.cols.forEach((c,i)=>{ const s=document.querySelector('#'+id+' th[data-c="'+i+'"] .sarr'); if(s) s.textContent=t.sort.col===i?(t.sort.dir>0?'▲':'▼'):''; });
+}
+function kskSortBy(id,i){ const t=KSKT[id]; if(!t||t.cols[i].noSort)return; if(t.sort.col===i)t.sort.dir*=-1; else{t.sort.col=i;t.sort.dir=t.cols[i].num?-1:1;} kskDraw(id); }
+function kskTable(id,cols,rows,opts){
+  opts=opts||{}; KSKT[id]={cols,rows,onRow:opts.onRow,sort:{col:(opts.sortCol==null?-1:opts.sortCol),dir:opts.sortDir||1}};
+  const head=cols.map((c,i)=>`<th data-c="${i}" class="${c.num?'n':''}" ${c.noSort?'':`onclick="kskSortBy('${id}',${i})" style="cursor:pointer"`} title="${c.noSort?'':'Click to sort'}">${esc(c.label)} <span class="sarr"></span></th>`).join('');
+  setTimeout(()=>kskDraw(id),0);
+  return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
+}
+
 const TABS = [['pending','Pending'],['ext','Extensions'],['reg','Register'],['new','New PO'],['value','Value']];
 function drawNav(){
   const t = isAdmin() ? TABS : TABS.filter(x=>!['new','value'].includes(x[0]));
@@ -159,12 +198,20 @@ function regDraw(){
   });
   const btn = $('#f-' + (REGF==='derived'?'der':REGF)); if(btn) btn.classList.add('dark');
   const list = REG.filter(p=>hit(p)&&pass(p));
-  const g = list.filter(p=>p.po_type==='GOVT'), pv = list.filter(p=>p.po_type==='PVT');
+  const cols=[
+    {label:'Customer', cls:()=>'wrap', get:p=>p.customer,
+      cell:p=>`<b>${esc(p.customer)}</b><span class="s2">${esc(p.po_no)} · ext ${esc(p.external_po_no||'—')}</span>`},
+    {label:'Zone', get:p=>p.zone||'', cell:p=>esc(p.zone||'—')},
+    {label:'Consignee', cls:()=>'wrap', get:p=>p.consignee||'', cell:p=>esc(p.consignee||'—')},
+    {label:'DP', sort:p=>p.dp_current||'9999-99-99', cell:p=>fmt(p.dp_current)},
+    {label:'Lines open', num:true, sort:p=>p.pending_lines, cell:p=>`${p.pending_lines}/${p.line_count}`},
+    {label:'Overdue', num:true, get:p=>p.overdue_lines, cell:p=>p.overdue_lines>0?`<span class="tag late">${p.overdue_lines}</span>`:'—'},
+    {label:'Type', get:p=>p.po_type, cell:p=>`<span class="tag ${p.po_type}">${p.po_type}</span>${derived(p)?' <span class="tag" style="background:#fff4e5;color:#8a5a00">SALES</span>':''}`},
+    {label:'Status', get:p=>p.status, cell:p=>p.status!=='OPEN'?`<span class="tag info">${esc(p.status)}</span>`:'<span class="tag ok">OPEN</span>'}
+  ];
   $('#reglist').innerHTML =
-    `<p class="muted" style="margin:10px 4px">Showing ${list.length} of ${REG.length} POs</p>` +
-    (g.length?`<h2>Government (${g.length})</h2>`+g.map(poCard).join(''):'') +
-    (pv.length?`<h2>Private (${pv.length})</h2>`+pv.map(poCard).join(''):'') +
-    (list.length?'':'<p class="muted" style="padding:20px;text-align:center">Nothing matches.</p>');
+    `<p class="muted" style="margin:8px 4px">Showing ${list.length} of ${REG.length} POs · click a column to sort</p>` +
+    kskTable('t-reg', cols, list, {onRow:p=>`openPO('${p.id}')`, sortCol:3, sortDir:1});
 }
 
 // ---- cards ----
@@ -245,6 +292,30 @@ async function reopenLine(lineId){
   toast('Re-opened'); $('#dlg').close(); render[TAB]();
 }
 
+// ---- pending (line-level sortable table) ----
+let PEND_LINES=[], PENDF='all';
+function pendFilter(f){
+  PENDF=f;
+  ['all','od','soon','nodp'].forEach(k=>{ const b=$('#pf-'+k); if(b) b.classList.remove('dark'); });
+  const ab=$('#pf-'+f); if(ab) ab.classList.add('dark');
+  let rows=PEND_LINES;
+  if(f==='od') rows=rows.filter(l=>l.dp_current && l.dp_current<today());
+  else if(f==='soon') rows=rows.filter(l=>l._d!==null && l._d>=0 && l._d<=30);
+  else if(f==='nodp') rows=rows.filter(l=>!l.dp_current);
+  const cols=[
+    {label:'Customer', cls:()=>'wrap', get:l=>l._po.customer,
+      cell:l=>`<b>${esc(l._po.customer)}</b><span class="s2">${esc(l._po.po_no)}${l._po.zone?' · '+esc(l._po.zone):''}${l._po.consignee?' · '+esc(l._po.consignee):''}</span>`},
+    {label:'Item', cls:()=>'wrap', get:l=>l.item,
+      cell:l=>`${esc(l.item)}<span class="s2">${esc(l.drawing_no||'no drawing')}${l.schedule_sr?' · Sr '+esc(l.schedule_sr):''}</span>`},
+    {label:'Balance', num:true, get:l=>l.balance,
+      cell:l=>`<b>${num(l.balance)}</b> ${esc(l.uom||'')}<span class="s2">of ${num(l.qty_ordered)}</span>`},
+    {label:'DP', sort:l=>l.dp_current||'9999-99-99', cell:l=>fmt(l.dp_current)},
+    {label:'Status', sort:l=>l._d==null?1e9:l._d, cell:l=>dpTag(l.dp_current,false)},
+    {label:'Type', get:l=>l._po.po_type, cell:l=>`<span class="tag ${l._po.po_type}">${l._po.po_type}</span>`}
+  ];
+  $('#pendtbl').innerHTML = kskTable('t-pend', cols, rows, {onRow:l=>`openPO('${l._po.id}')`, sortCol:4, sortDir:1});
+}
+
 // ---- tabs ----
 const render = {
   async pending(){
@@ -253,40 +324,25 @@ const render = {
       q('v_po_lines', x=>x.eq('complete', false))
     ]);
     const byPo = Object.fromEntries(pos.map(p=>[p.id,p]));
-    const od = lines.filter(l=>l.dp_current && l.dp_current < today());
-    const soon = lines.filter(l=>{ const d=days(l.dp_current); return d!==null && d>=0 && d<=30; });
-    const noDP = lines.filter(l=>!l.dp_current);
-    const grp = ls => { const m={}; ls.forEach(l=>{ (m[l.po_id] ||= []).push(l); }); return m; };
-    const block = (ls, empty) => {
-      const g = grp(ls); const keys = Object.keys(g);
-      if(!keys.length) return `<p class="muted" style="margin:0 4px 10px">${empty}</p>`;
-      return keys.sort((a,b)=>{
-        const da = Math.min(...g[a].map(l=>days(l.dp_current) ?? 9e9));
-        const db = Math.min(...g[b].map(l=>days(l.dp_current) ?? 9e9));
-        return da-db;
-      }).map(id=>{
-        const p = byPo[id]; if(!p) return '';
-        return `<div class="card clickable" onclick="openPO('${id}')">
-          <div class="row"><div class="grow"><div class="t-title">${esc(p.customer)}</div>
-          <div class="t-sub">${p.po_no}${p.zone?' · '+esc(p.zone):''} · ${esc(p.consignee||'—')}</div></div>
-          <span class="tag ${p.po_type}">${p.po_type}</span></div>
-          ${g[id].sort((a,b)=>(a.dp_current||'9')<(b.dp_current||'9')?-1:1).map(l=>`<div class="row" style="margin-top:8px">
-            <div class="grow"><div class="t-sub" style="color:#233;font-size:13px">${esc(l.item)} <span class="muted">${esc(l.drawing_no||'')}</span></div>
-            ${l.consignee?`<div class="t-sub" style="color:#556">▸ ${esc(l.consignee)}${l.schedule_sr?` <span class="muted">Sr ${esc(l.schedule_sr)}</span>`:''}</div>`:''}
-            <div class="t-sub">bal <b>${num(l.balance)}</b> ${esc(l.uom||'')} of ${num(l.qty_ordered)} · DP ${fmt(l.dp_current)}</div></div>
-            ${dpTag(l.dp_current, false)}</div>`).join('')}
-        </div>`;
-      }).join('');
-    };
+    PEND_LINES = lines.map(l=>({...l, _po:byPo[l.po_id]||{}, _d:days(l.dp_current)})).filter(l=>l._po.id);
+    const od = PEND_LINES.filter(l=>l.dp_current && l.dp_current < today());
+    const soon = PEND_LINES.filter(l=>l._d!==null && l._d>=0 && l._d<=30);
+    const noDP = PEND_LINES.filter(l=>!l.dp_current);
     $('#main').innerHTML = `<div class="kpi">
         <div class="${od.length?'alert':''}"><b>${od.length}</b><span>lines past DP</span></div>
         <div><b>${soon.length}</b><span>due ≤30 days</span></div>
-        <div><b>${lines.length}</b><span>lines open</span></div>
-        ${noDP.length?`<div class="${noDP.length?'alert':''}"><b>${noDP.length}</b><span>no DP set</span></div>`:''}
+        <div><b>${PEND_LINES.length}</b><span>lines open</span></div>
+        ${noDP.length?`<div class="alert"><b>${noDP.length}</b><span>no DP set</span></div>`:''}
       </div>
-      <h2>Past DP — LD risk, act first</h2>${block(od,'Nothing overdue. ✓')}
-      <h2>Closing in — next 30 days</h2>${block(soon,'Nothing due this month.')}
-      ${noDP.length?`<h2>No DP recorded</h2>${block(noDP,'')}`:''}`;
+      <div class="row" style="margin:2px 2px 10px;flex-wrap:wrap">
+        <button class="a" id="pf-all" onclick="pendFilter('all')">All open</button>
+        <button class="a" id="pf-od" onclick="pendFilter('od')">Past DP</button>
+        <button class="a" id="pf-soon" onclick="pendFilter('soon')">Due ≤30d</button>
+        <button class="a" id="pf-nodp" onclick="pendFilter('nodp')">No DP</button>
+        <span class="muted" style="margin-left:auto;align-self:center">Click a column to sort</span>
+      </div>
+      <div id="pendtbl"></div>`;
+    pendFilter(PENDF||'all');
   },
   async ext(){
     const [pos, unp, pend, granted, ld] = await Promise.all([
@@ -302,30 +358,30 @@ const render = {
     const who = id => byPo[id] ? `${esc(byPo[id].customer)} <span class="muted">${byPo[id].po_no}</span>` : '—';
 
     // 1. Overdue with NO extension applied for — live LD risk, no cover.
+    const unpCols=[
+      {label:'Customer', cls:()=>'wrap', get:l=>byPo[l.po_id]?.customer||'',
+        cell:l=>`<b>${esc(byPo[l.po_id]?.customer||'—')}</b><span class="s2">${esc(byPo[l.po_id]?.po_no||'')}</span>`},
+      {label:'Item', cls:()=>'wrap', get:l=>l.item, cell:l=>`${esc(l.item)}<span class="s2">${esc(l.drawing_no||'')}</span>`},
+      {label:'Balance', num:true, get:l=>l.balance, cell:l=>`<b>${num(l.balance)}</b> ${esc(l.uom||'')}<span class="s2">of ${num(l.qty_ordered)}</span>`},
+      {label:'DP', sort:l=>l.dp_current||'', cell:l=>fmt(l.dp_current)},
+      {label:'Overdue', num:true, get:l=>l.days_overdue, cell:l=>`<span class="tag late">${l.days_overdue}d</span>`}
+    ].concat(isAdmin()?[{label:'Action', noSort:true, cell:l=>`<button class="a gold" onclick="extendDP(null,'${l.line_id}','${esc(l.item)}')">⟳ Apply</button>`}]:[]);
     const unpBlock = !unp.length
       ? '<p class="muted" style="margin:0 4px 10px">Every overdue line has an extension on record. ✓</p>'
-      : unp.map(l=>`<div class="card">
-          <div class="row"><div class="grow">
-            <div class="t-title">${who(l.po_id)}</div>
-            <div class="t-sub" style="color:#233">${esc(l.item)} <span class="muted">${esc(l.drawing_no||'')}</span></div>
-            <div class="t-sub">bal <b>${num(l.balance)}</b> ${esc(l.uom||'')} of ${num(l.qty_ordered)} · DP ${fmt(l.dp_current)}</div>
-          </div><span class="tag late">${l.days_overdue}d OVERDUE</span></div>
-          ${isAdmin()?`<div class="row" style="margin-top:9px">
-            <button class="a gold" onclick="extendDP(null,'${l.line_id}','${esc(l.item)}')">⟳ Apply for extension</button>
-          </div>`:''}</div>`).join('');
+      : kskTable('t-unp', unpCols, unp, {sortCol:4, sortDir:-1});
 
     // 2. Applied for, no reply yet.
+    const pendCols=[
+      {label:'Customer', cls:()=>'wrap', get:e=>byPo[e.po_id]?.customer||'',
+        cell:e=>`<b>${esc(byPo[e.po_id]?.customer||'—')}</b><span class="s2">${esc(byPo[e.po_id]?.po_no||'')}</span>`},
+      {label:'Scope', get:e=>e.line_id?'Line':'Whole PO', cell:e=>e.line_id?'Line-level':'<b>Whole PO</b>'},
+      {label:'Applied', sort:e=>e.applied_on||'', cell:e=>fmt(e.applied_on)},
+      {label:'Asked DP', sort:e=>e.dp_requested||'', cell:e=>fmt(e.dp_requested)},
+      {label:'Waiting', num:true, get:e=>e.days_waiting, cell:e=>`<span class="tag ${e.days_waiting>21?'late':'soon'}">${e.days_waiting}d</span>`}
+    ].concat(isAdmin()?[{label:'Action', noSort:true, cell:e=>`<button class="a dark" onclick="grantExt('${e.id}','${fmt(e.dp_requested)}','${e.dp_requested}')">✓ Grant</button>`}]:[]);
     const pendBlock = !pend.length
       ? '<p class="muted" style="margin:0 4px 10px">Nothing awaiting a reply.</p>'
-      : pend.map(e=>`<div class="card">
-          <div class="row"><div class="grow">
-            <div class="t-title">${who(e.po_id)}</div>
-            <div class="t-sub">${e.line_id?'Line-level':'<b>Whole PO</b>'} · applied ${fmt(e.applied_on)} · asked for DP ${fmt(e.dp_requested)}
-              ${e.remarks?'<br>'+esc(e.remarks):''}</div>
-          </div><span class="tag ${e.days_waiting>21?'late':'soon'}">${e.days_waiting}d waiting</span></div>
-          ${isAdmin()?`<div class="row" style="margin-top:9px">
-            <button class="a dark" onclick="grantExt('${e.id}','${fmt(e.dp_requested)}','${e.dp_requested}')">✓ Record grant</button>
-          </div>`:''}</div>`).join('');
+      : kskTable('t-extpend', pendCols, pend, {sortCol:4, sortDir:-1});
 
     // 3. Granted — history, with LD exposure for Director/Admin.
     const grantBlock = !granted.length
@@ -406,12 +462,13 @@ const render = {
         <div class="alert"><b style="font-size:15px">${money(pend)}</b><span>yet to dispatch</span></div>
         <div><b style="font-size:15px">${money(tot-pend)}</b><span>dispatched</span></div>
       </div>
-      <div class="card"><div class="t-title">Value by PO</div>
-      <p class="muted" style="margin:3px 0 8px">Visible to Director &amp; Admin only — enforced in the database, not here.</p>
-      <table><tr><th>PO</th><th class="n">Order</th><th class="n">Pending</th></tr>
-      ${rows.map(r=>`<tr><td>${esc(r.p.customer)}<br><span class="muted">${r.p.po_no}</span></td>
-        <td class="n">${money(r.value)}</td><td class="n"><b>${money(r.pending)}</b></td></tr>`).join('')}
-      </table></div>`;
+      <h2>Value by PO <span class="muted" style="font-weight:400;text-transform:none">· Director &amp; Admin only, enforced in the database · click a column to sort</span></h2>
+      ${kskTable('t-value', [
+        {label:'PO', cls:()=>'wrap', get:r=>r.p.customer, cell:r=>`<b>${esc(r.p.customer)}</b><span class="s2">${esc(r.p.po_no)}</span>`},
+        {label:'Order value', num:true, get:r=>r.value, cell:r=>money(r.value)},
+        {label:'Dispatched', num:true, get:r=>r.value-r.pending, cell:r=>money(r.value-r.pending)},
+        {label:'Pending', num:true, get:r=>r.pending, cell:r=>`<b>${money(r.pending)}</b>`}
+      ], rows, {sortCol:3, sortDir:-1})}`;
   }
 };
 
