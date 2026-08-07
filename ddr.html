@@ -1,0 +1,387 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Director Daily Report (ddr.html)
+     Deploys on: GitHub Pages. Upload this whole file, never edit in place.
+
+     Figures are drawn live from the company database (ddr.reports),
+     written each morning by the Director Daily Report automation.
+     Access is DIRECTOR / ADMIN only — enforced in Postgres by the
+     ddr_report() function, not by hiding a <div>.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KSK ERP — Director Daily Report</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#12395f; --navy-d:#0d2a47; --gold:#c9a227;
+    --ink:#1a1a1a; --ink-2:#444; --ink-3:#6b7280;
+    --line:#d0d7de; --line-2:#e8ebef; --head:#f1f4f8; --bg:#eef1f5;
+    --ok:#15803d; --ok-bg:#e8f5ec; --bad:#b42318; --bad-bg:#fdecea;
+    --warn:#a15c07; --warn-bg:#fdf3e3; --info:#175cd3; --info-bg:#e8f1fd;
+    --excel:#1d6f42;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+  .titlebar{background:var(--navy);color:#fff;padding:10px 18px;display:flex;align-items:center;gap:14px}
+  .titlebar .logo{background:var(--gold);color:var(--navy-d);font-weight:800;font-size:15px;letter-spacing:.5px;padding:6px 10px;border-radius:3px}
+  .titlebar .co{flex:1;min-width:0}
+  .titlebar .co b{display:block;font-size:16px;font-weight:600;letter-spacing:.2px}
+  .titlebar .co span{display:block;font-size:11.5px;opacity:.8}
+  .titlebar .usr{font-size:12.5px;text-align:right;white-space:nowrap}
+  .titlebar .usr b{display:block;font-weight:600}
+  .titlebar .usr span{opacity:.8;font-size:11.5px}
+  .cmdbar{background:#fff;border-bottom:1px solid var(--line);padding:7px 14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  .cmd{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:6px 12px;font-size:13px;font-family:inherit;color:var(--ink);cursor:pointer;white-space:nowrap}
+  .cmd:hover{background:var(--head);border-color:#9aa5b1}
+  .cmd.primary{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .cmd.primary:hover{background:var(--navy-d)}
+  .cmd.excel{color:var(--excel);border-color:#a8cbb6;font-weight:600}
+  .cmd.excel:hover{background:#eaf5ef}
+  .cmd .k{font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:2px;padding:0 4px;margin-left:2px}
+  .sep{width:1px;height:24px;background:var(--line);margin:0 5px}
+  .picker{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2)}
+  .picker select{padding:5px 8px;border:1px solid var(--line);border-radius:3px;font-size:13px;font-family:inherit;background:#fff}
+  .asof{margin-left:auto;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+  .asof b{color:var(--ink)}
+  main{max-width:1180px;margin:0 auto;padding:16px}
+  h2.sec{font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.7px;margin:20px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--navy)}
+  h2.sec:first-of-type{margin-top:4px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px}
+  .kpi{background:#fff;border:1px solid var(--line);border-top:3px solid var(--navy);border-radius:3px;padding:12px 14px}
+  .kpi.red{border-top-color:var(--bad)} .kpi.amber{border-top-color:var(--warn)} .kpi.green{border-top-color:var(--ok)}
+  .kpi .lbl{font-size:11.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+  .kpi .val{font-size:24px;font-weight:600;color:var(--navy);margin:3px 0 1px;letter-spacing:-.4px}
+  .kpi.red .val{color:var(--bad)} .kpi.amber .val{color:var(--warn)} .kpi.green .val{color:var(--ok)}
+  .kpi .sub{font-size:12px;color:var(--ink-3)}
+  .insight{background:var(--info-bg);border:1px solid #aecbf5;border-left:4px solid var(--info);border-radius:3px;padding:11px 14px;margin:14px 0 4px;font-size:13.5px;color:#123f7a}
+  .insight b{color:var(--navy)}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+  .panel .phead{background:var(--head);border-bottom:1px solid var(--line);padding:9px 14px;font-size:13px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:8px}
+  .panel .phead .note{margin-left:auto;font-weight:400;font-size:12px;color:var(--ink-3)}
+  .matrix{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{background:var(--head);color:var(--ink-2);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line-2);white-space:nowrap}
+  thead th:last-child{border-right:0}
+  tbody td{padding:7px 10px;border-bottom:1px solid var(--line-2);border-right:1px solid var(--line-2);vertical-align:middle;white-space:nowrap}
+  tbody td:last-child{border-right:0}
+  tbody tr:nth-child(even){background:#fafbfc}
+  tbody tr:hover{background:#eef4fb}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.neg{color:var(--bad)}
+  td.dim{color:var(--ink-3)}
+  tr.total td{background:var(--head)!important;font-weight:700;border-top:2px solid var(--navy)}
+  .rowlbl{font-weight:600;color:var(--ink)}
+  .stick{position:sticky;left:0;background:inherit;z-index:1}
+  thead th.stick{background:var(--head);z-index:2}
+  .badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:3px;white-space:nowrap;border:1px solid}
+  .badge.red{background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
+  .badge.amber{background:var(--warn-bg);color:var(--warn);border-color:#e8c98a}
+  .badge.green{background:var(--ok-bg);color:var(--ok);border-color:#a8d5b8}
+  .card{background:#fff;border:1px solid var(--line);border-radius:3px;padding:20px;max-width:430px;margin:36px auto}
+  .card h3{font-size:16px;color:var(--navy);margin-bottom:6px}
+  .btn{width:100%;padding:9px;margin-top:14px;border:1px solid var(--navy);border-radius:3px;background:var(--navy);color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--navy)}
+  .muted{color:var(--ink-3);font-size:12.5px;line-height:1.5}
+  #screen-app,#screen-login,#screen-denied{display:none}
+  footer{text-align:center;font-size:11.5px;color:var(--ink-3);padding:22px 14px 30px}
+  @media print{
+    body{background:#fff;font-size:10pt}
+    .cmdbar,.ksk-sb,#ksk-hamb,.noprint,footer .np{display:none!important}
+    .titlebar{background:#fff!important;color:#000!important;border-bottom:2.5pt solid #12395f;padding:0 0 8pt}
+    .titlebar .logo{background:#fff;color:#000;border:1.5pt solid #12395f}
+    .titlebar .usr{display:none}
+    body.ksk-on{padding-left:0!important}
+    main{max-width:100%;padding:0}
+    .panel,.kpi{break-inside:avoid;box-shadow:none}
+    h2.sec{break-after:avoid}
+    .matrix{overflow:visible}
+    @page{margin:12mm;size:A4 landscape}
+  }
+  /* ===== KSK desktop shell ===== */
+  :root{ --ksk-sbw:238px; }
+  #ksk-hamb{ display:none; }
+  @media(min-width:901px){ html:has(body.ksk-on){ background:linear-gradient(to right,#0d2a47 var(--ksk-sbw), #eef1f5 var(--ksk-sbw)) fixed; } }
+  .ksk-sb{ display:none; position:fixed; top:0; left:0; bottom:0; width:var(--ksk-sbw);
+    background:linear-gradient(180deg,#12395f,#0d2a47); color:#cdd9e6;
+    display:flex; flex-direction:column; z-index:200; font-family:"Segoe UI",system-ui,sans-serif; }
+  .ksk-sb .bnd{ padding:15px 18px; display:flex; align-items:baseline; gap:9px; border-bottom:1px solid rgba(255,255,255,.08); }
+  .ksk-sb .bnd .lg{ background:#c9a227; color:#0d2a47; font-weight:800; font-size:15px; padding:4px 8px; border-radius:3px; letter-spacing:.5px; }
+  .ksk-sb .bnd .tx{ font-size:10px; letter-spacing:2px; color:#8ba0b6; text-transform:uppercase; }
+  .ksk-sb .nv{ display:flex; flex-direction:column; padding:10px 12px; gap:2px; }
+  .ksk-sb .nv-a{ display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:8px;
+    color:#cdd9e6; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .ksk-sb .nv-a:hover{ background:rgba(255,255,255,.07); color:#fff; }
+  .ksk-sb .nv-a.on{ background:rgba(201,162,39,.18); color:#fff; box-shadow:inset 3px 0 0 #c9a227; }
+  .ksk-sb .nv-a .ic{ width:18px; text-align:center; opacity:.9; font-size:15px; }
+  body.ksk-on .ksk-sb{ display:flex; }
+  .ksk-sb .foot{ margin-top:auto; padding:12px 16px; font-size:10.5px; line-height:1.4; color:#7f93a8; border-top:1px solid rgba(255,255,255,.08); }
+  @media(min-width:901px){
+    body.ksk-on{ padding-left:var(--ksk-sbw); }
+    .titlebar{ padding-left:22px !important; }
+    main{ max-width:1500px !important; margin:0 auto !important; padding:20px 30px !important; }
+  }
+  @media(max-width:900px){
+    .ksk-sb{ transform:translateX(-100%); transition:transform .25s; width:252px; }
+    body.ksk-nav-open .ksk-sb{ transform:none; }
+    #ksk-hamb{ display:flex; position:fixed; top:9px; left:9px; z-index:201; width:38px; height:38px;
+      align-items:center; justify-content:center; background:#0d2a47; color:#fff; border:0; border-radius:8px; font-size:18px; cursor:pointer; }
+    .titlebar{ padding-left:56px !important; }
+  }
+</style>
+</head>
+<body>
+<button id="ksk-hamb" onclick="document.body.classList.toggle('ksk-nav-open')">&#9776;</button>
+<aside class="ksk-sb">
+  <div class="bnd"><span class="lg">KSK</span><span class="tx">ERP 1.0</span></div>
+  <nav class="nv">
+    <a class="nv-a" href="./index.html"><span class="ic">&#9636;</span><span>Dashboard</span></a>
+    <a class="nv-a" href="./orders.html"><span class="ic">&#9638;</span><span>Orders</span></a>
+    <a class="nv-a" href="./sales.html"><span class="ic">&#8377;</span><span>Sales</span></a>
+    <a class="nv-a" href="./production.html"><span class="ic">&#9881;</span><span>Production</span></a>
+    <a class="nv-a" href="./masters.html"><span class="ic">&#9776;</span><span>Masters</span></a>
+    <a class="nv-a" href="./kartavya.html"><span class="ic">&#10003;</span><span>Kartavya</span></a>
+    <a class="nv-a on" href="./ddr.html"><span class="ic">&#9744;</span><span>Daily Report</span></a>
+  </nav>
+  <div class="foot">KSK Engineering Industries Pvt. Ltd.</div>
+</aside>
+
+<div class="titlebar">
+  <div class="logo">KSK</div>
+  <div class="co">
+    <b>KSK Engineering Industries Pvt. Ltd.</b>
+    <span id="subtitle">Director Daily Report</span>
+  </div>
+  <div class="usr" id="usr"></div>
+</div>
+
+<!-- ============ LOGIN ============ -->
+<section id="screen-login">
+  <div class="card">
+    <h3>Sign in</h3>
+    <p class="muted">Use your company Google account. If Google sign-in is unavailable, request an email link below.</p>
+    <button class="btn" id="btn-google" style="margin-top:14px">Sign in with Google</button>
+    <label style="display:block;font-size:12.5px;color:var(--ink-2);font-weight:600;margin:12px 0 4px" for="email">Email address (fallback)</label>
+    <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-size:14px;font-family:inherit">
+    <button class="btn ghost" id="btn-login">Send sign-in link</button>
+    <div class="muted" id="login-msg" style="margin-top:10px"></div>
+  </div>
+</section>
+
+<section id="screen-denied">
+  <div class="card">
+    <h3>Access not enabled</h3>
+    <p class="muted">You are signed in, but this account has not been granted access to KSK ERP. Please contact the Director.</p>
+    <button class="btn ghost" onclick="signOut()">Sign out</button>
+  </div>
+</section>
+
+<!-- ============ REPORT ============ -->
+<section id="screen-app">
+  <div class="cmdbar noprint">
+    <button class="cmd primary" onclick="load()" title="Reload the report from the database">&#8635; Refresh</button>
+    <button class="cmd" onclick="window.print()" title="Print or save as PDF (Ctrl+P)">&#128424; Print<span class="k">Ctrl+P</span></button>
+    <button class="cmd excel" onclick="exportExcel()" title="Download as a spreadsheet">&#8681; Export to Excel</button>
+    <div class="sep"></div>
+    <span class="picker">Report date <select id="datesel" onchange="load(this.value)"></select></span>
+    <div class="sep"></div>
+    <button class="cmd" onclick="signOut()">Sign out</button>
+    <div class="asof">As on <b id="asof">&mdash;</b></div>
+  </div>
+  <main>
+    <div id="body"><p class="muted" style="padding:40px;text-align:center">Loading the Director Daily Report&hellip;</p></div>
+    <footer>
+      KSK ERP 1.0 &middot; Director Daily Report &middot; figures drawn live from the company database
+      <span class="np">&middot; <span id="foot-role"></span></span>
+    </footer>
+  </main>
+</section>
+
+<script>
+const SUPABASE_URL="https://xpacvqbmpvcwhcimieaq.supabase.co";
+const ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c";
+const sb=supabase.createClient(SUPABASE_URL,ANON_KEY);
+const $=id=>document.getElementById(id);
+let ME=null, REP=null, PREV=null;
+
+const esc=t=>(t??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const n0=v=>v==null?'':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const n2=v=>v==null?'':Number(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+function money(v){
+  if(v==null||v==='') return '';
+  v=Number(v); if(isNaN(v)) return '';
+  const s=v<0?'-':''; v=Math.abs(v);
+  if(v>=1e7) return s+'₹'+(v/1e7).toFixed(2)+' cr';
+  if(v>=1e5) return s+'₹'+(v/1e5).toFixed(2)+' L';
+  return s+'₹'+v.toLocaleString('en-IN',{maximumFractionDigits:0});
+}
+const dl=d=>d?new Date(d+'T00:00').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}):'—';
+
+// ---------- auth ----------
+$('btn-google').onclick=async()=>{
+  const{error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
+  if(error)$('login-msg').textContent=error.message;
+};
+$('btn-login').onclick=async()=>{
+  const email=$('email').value.trim().toLowerCase();
+  if(!email){$('login-msg').textContent='Please enter your email address.';return;}
+  const{error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+  $('login-msg').textContent=error?error.message:'Link sent. Open it on this device, in this browser.';
+};
+async function signOut(){await sb.auth.signOut();location.reload();}
+function show(id){['screen-login','screen-denied','screen-app'].forEach(s=>$(s).style.display=s===id?'block':'none');document.body.classList.toggle('ksk-on',id==='screen-app');}
+
+// ---------- format helper by row fmt ----------
+function fmtVal(fmt,v){
+  if(v==null||v==='') return {t:'',neg:false};
+  if(fmt==='money'){const t=money(v);return {t,neg:Number(v)<0};}
+  if(fmt==='mt'){return {t:n2(v)+'',neg:false};}
+  if(fmt==='num'){return {t:n0(v),neg:false};}
+  return {t:esc(v),neg:false}; // text
+}
+
+// ---------- render a product-line matrix section ----------
+function matrix(title,note,sec,opts){
+  opts=opts||{};
+  const cols=sec.cols||[];
+  const head=['<th class="stick">Particulars</th>']
+    .concat(opts.uom?['<th>UOM</th>']:[])
+    .concat(['<th>Source</th>','<th class="num">Total</th>'])
+    .concat(cols.map(c=>`<th class="num">${esc(c)}</th>`)).join('');
+  const rowHtml=(r,isTot)=>{
+    const f=r.fmt||'money';
+    const tot=fmtVal(f,r.total);
+    let tds=`<td class="stick rowlbl">${esc(r.label)}</td>`;
+    if(opts.uom) tds+=`<td class="dim">${esc(r.uom||'')}</td>`;
+    tds+=`<td class="dim">${esc(r.source||'')}</td>`;
+    tds+=`<td class="num ${tot.neg?'neg':''}">${tot.t}</td>`;
+    tds+=cols.map(c=>{const cell=fmtVal(f,(r.vals||{})[c]);return `<td class="num ${cell.neg?'neg':''}">${cell.t}</td>`;}).join('');
+    return `<tr class="${isTot?'total':''}">${tds}</tr>`;
+  };
+  const rows=(sec.rows||[]).map(r=>rowHtml(r,false)).join('');
+  const totRow=sec.total?rowHtml(sec.total,true):'';
+  return `<h2 class="sec">${esc(title)}</h2>
+    <div class="panel"><div class="phead">${esc(title)}${note?`<span class="note">${esc(note)}</span>`:''}</div>
+    <div class="matrix"><table><thead><tr>${head}</tr></thead><tbody>${rows}${totRow}</tbody></table></div></div>`;
+}
+
+// ---------- insight line ----------
+function insight(d,prev){
+  const s=d.summary, p=prev&&prev.summary;
+  const bits=[];
+  bits.push(`Working capital deployed <b>${money(s.total)}</b>`);
+  if(p){const dv=s.total-p.total;bits.push(`${dv>=0?'up':'down'} ${money(Math.abs(dv))} vs ${dl(PREV.report_date)}`);}
+  // production % of plan
+  const pr=d.production, rows=(pr&&pr.rows)||[];
+  const plan=(rows.find(r=>r.label==='Planned Production')||{}).total;
+  const act=(rows.find(r=>r.label==='Actual Production')||{}).total;
+  let prodline='';
+  if(plan&&act!=null){const pct=Math.round(act/plan*100);prodline=` Production <b>${n2(act)} MT</b> — ${pct}% of the ${n2(plan)} MT plan.`;}
+  else if(pr&&pr.status){prodline=` Production: <b>${esc(pr.status)}</b>.`;}
+  // dispatch vs receipt
+  const disp=(rows.find(r=>r.label==='Dispatch (Value)')||{}).total;
+  const recv=(rows.find(r=>r.label==='Raw Material Received')||{}).total;
+  let flow='';
+  if(disp!=null&&recv!=null) flow=` Dispatch ${money(disp)} against raw intake ${money(recv)}${recv>disp?' — more went in than out.':'.'}`;
+  const stockUp=p&&(s.stock>p.stock);
+  const tail=stockUp?` Stock rose to ${money(s.stock)} while net receivables sit at ${money(s.debtors_net)}.`:` Net receivables ${money(s.debtors_net)}.`;
+  return `<div class="insight">${bits.join(', ')}.${prodline}${flow}${tail}</div>`;
+}
+
+// ---------- draw ----------
+function draw(){
+  const d=REP&&REP.data;
+  if(!d){$('body').innerHTML='<div class="panel"><div style="padding:20px" class="muted">No report found for this date.</div></div>';return;}
+  const s=d.summary, p=PREV&&PREV.data&&PREV.data.summary;
+  const chg=(cur,pre)=>{if(p==null||pre==null)return '';const v=cur-pre;const cls=v<0?'neg':'';return `<span class="num ${cls}" style="font-size:12px">${v>=0?'+':''}${money(v)}</span>`;};
+  $('body').innerHTML=`
+    <h2 class="sec">Working capital &mdash; as on ${dl(REP.report_date)}</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Total deployed</div><div class="val">${money(s.total)}</div><div class="sub">${p!=null?('vs '+money(p.total)+' on '+dl(PREV.report_date)):''}</div></div>
+      <div class="kpi"><div class="lbl">Stock</div><div class="val">${money(s.stock)}</div><div class="sub">${p!=null?chgTxt(s.stock,p.stock):''}</div></div>
+      <div class="kpi"><div class="lbl">Debtors (net)</div><div class="val">${money(s.debtors_net)}</div><div class="sub">${p!=null?chgTxt(s.debtors_net,p.debtors_net):''}</div></div>
+      <div class="kpi ${s.advance_net<0?'amber':''}"><div class="lbl">Advance (net)</div><div class="val">${money(s.advance_net)}</div><div class="sub">${s.advance_net<0?'Net creditor position':'Advance to creditors'}</div></div>
+    </div>
+    ${insight(d,PREV&&PREV.data)}
+    ${matrix('Production, Inward & Outward', d.production&&d.production.reason?('Deviation: '+d.production.reason):'', d.production||{cols:[],rows:[]}, {uom:true})}
+    ${matrix('Stock', 'Source: Tally', d.stock||{cols:[],rows:[]}, {})}
+    ${matrix('Debtors', 'Gross less advances and bill discounting', d.debtors||{cols:[],rows:[]}, {})}
+    ${matrix('Advance & Creditors', 'Advance to creditors less creditors', d.advance||{cols:[],rows:[]}, {})}
+    <h2 class="sec">Total investment summary</h2>
+    <div class="panel"><table>
+      <thead><tr><th style="width:46%">Particulars</th><th class="num">${dl(REP.report_date).split(',').slice(1).join(',').trim()}</th><th class="num">${PREV?dl(PREV.report_date).split(',').slice(1).join(',').trim():'Previous'}</th><th class="num">Change</th></tr></thead>
+      <tbody>
+        <tr><td class="rowlbl">Debtors (Net)</td><td class="num">${money(s.debtors_net)}</td><td class="num dim">${p!=null?money(p.debtors_net):''}</td><td class="num ${chgCls(s.debtors_net,p&&p.debtors_net)}">${chgStr(s.debtors_net,p&&p.debtors_net)}</td></tr>
+        <tr><td class="rowlbl">Stock</td><td class="num">${money(s.stock)}</td><td class="num dim">${p!=null?money(p.stock):''}</td><td class="num ${chgCls(s.stock,p&&p.stock)}">${chgStr(s.stock,p&&p.stock)}</td></tr>
+        <tr><td class="rowlbl">Advance (Net)</td><td class="num ${s.advance_net<0?'neg':''}">${money(s.advance_net)}</td><td class="num dim">${p!=null?money(p.advance_net):''}</td><td class="num ${chgCls(s.advance_net,p&&p.advance_net)}">${chgStr(s.advance_net,p&&p.advance_net)}</td></tr>
+        <tr class="total"><td>Total working capital deployed</td><td class="num">${money(s.total)}</td><td class="num">${p!=null?money(p.total):''}</td><td class="num ${chgCls(s.total,p&&p.total)}">${chgStr(s.total,p&&p.total)}</td></tr>
+      </tbody></table></div>
+    ${REP.source_note?`<p class="muted" style="margin:14px 2px">Source: ${esc(REP.source_note)}${REP.updated_at?(' · loaded '+new Date(REP.updated_at).toLocaleString('en-IN')):''}</p>`:''}`;
+}
+function chgTxt(cur,pre){if(pre==null)return '';const v=cur-pre;return (v>=0?'+':'')+money(v)+' vs prev';}
+function chgStr(cur,pre){if(pre==null||pre===undefined)return '';const v=cur-pre;return (v>=0?'+':'')+money(v);}
+function chgCls(cur,pre){if(pre==null||pre===undefined)return '';return (cur-pre)<0?'neg':'';}
+
+// ---------- export ----------
+function exportExcel(){
+  const rows=[];const push=(...c)=>rows.push(c);
+  push('KSK Engineering Industries Pvt. Ltd.');push('Director Daily Report');push('As on',dl(REP&&REP.report_date));push('');
+  document.querySelectorAll('#body table').forEach(t=>{
+    const cap=t.closest('.panel')?.querySelector('.phead')?.childNodes[0]?.textContent?.trim();
+    if(cap)push(cap);
+    t.querySelectorAll('tr').forEach(tr=>{
+      const cells=[...tr.children].map(td=>td.innerText.replace(/\s*\n\s*/g,' ').trim());
+      if(cells.some(x=>x))push(...cells);
+    });
+    push('');
+  });
+  const csv=rows.map(r=>r.map(c=>{const v=(c??'').toString();return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',')).join('\r\n');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='KSK Director Daily Report '+(REP?REP.report_date:'')+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+}
+
+// ---------- load ----------
+async function load(date){
+  $('body').innerHTML='<p class="muted" style="padding:40px;text-align:center">Loading the Director Daily Report&hellip;</p>';
+  const {data,error}=await sb.rpc('ddr_report',date?{p_date:date}:{});
+  if(error){$('body').innerHTML='<div class="panel"><div style="padding:16px"><b>Could not load the report.</b><div class="muted">'+esc(error.message)+'</div></div></div>';return;}
+  REP=data; PREV=null;
+  if(REP){
+    $('asof').textContent=dl(REP.report_date);
+    if(REP.prev_date){const pr=await sb.rpc('ddr_report',{p_date:REP.prev_date});PREV=pr.error?null:pr.data;}
+  }
+  draw();
+}
+async function loadDates(sel){
+  const {data,error}=await sb.rpc('ddr_dates');
+  if(error||!data)return;
+  $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${dl(r.report_date)}</option>`).join('');
+}
+
+async function route(session){
+  if(!session){show('screen-login');return;}
+  const{data,error}=await sb.rpc('my_profile');
+  if(error||!data||!data.length){show('screen-denied');return;}
+  ME=data[0];
+  $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
+  $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
+  show('screen-app');
+  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
+    $('datesel').style.display='none';return;
+  }
+  await loadDates();
+  await load($('datesel').value||undefined);
+}
+
+document.addEventListener('keydown',e=>{if(e.key==='F5'&&!e.ctrlKey){e.preventDefault();load($('datesel').value||undefined);}});
+sb.auth.getSession().then(({data})=>route(data.session));
+sb.auth.onAuthStateChange((_e,s)=>route(s));
+</script>
+</body>
+</html>
