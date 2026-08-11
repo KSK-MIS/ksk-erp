@@ -371,8 +371,13 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
+  var _sup=ME.is_super_admin, _mods=(ME.permissions&&ME.permissions.modules)||[];
+  document.querySelectorAll('.nv-a').forEach(function(a){
+    var k=(a.getAttribute('href')||'').replace(/^\.?\//,'').replace('.html','');
+    if(k&&k!=='index'&&k!=='ddr'&&!(_sup||_mods.indexOf(k)!==-1)) a.style.display='none';
+  });
+  if(!(_sup||_mods.indexOf('ddr')!==-1)){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Access not enabled.</b><div class="muted">The Director Daily Report carries financial figures. Your account has not been granted this module — please contact the Director.</div></div></div>';
     $('datesel').style.display='none';return;
   }
   await loadDates();

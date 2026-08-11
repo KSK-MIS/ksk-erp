@@ -257,8 +257,8 @@ body.ksk-on .ksk-sb{ display:flex; }
         <div id="user-list" style="padding:12px 14px" class="muted">Loading…</div>
       </div>
       <div class="panel" style="margin-top:12px">
-        <div class="phead">Add or update a user</div>
-        <div style="padding:14px;max-width:430px">
+        <div class="phead">Add or update a user<span class="note">Click a person in the list above to edit them</span></div>
+        <div style="padding:14px;max-width:460px">
           <label for="u-email">Email address</label>
           <input id="u-email" type="email" placeholder="name@kskenggind.com">
           <label for="u-name">Full name</label>
@@ -274,7 +274,18 @@ body.ksk-on .ksk-sb{ display:flex; }
             <option value="true">Active</option>
             <option value="false">Deactivated</option>
           </select>
+          <label style="margin-top:4px">Module access</label>
+          <div class="note" style="margin:-2px 0 6px">Which sections this person can open. A super-admin always sees everything; everyone else — including Directors and Admins — sees only what is ticked here.</div>
+          <div id="u-mods" style="display:flex;flex-wrap:wrap;gap:7px 16px;margin:2px 0 6px">
+            <label style="font-weight:400"><input type="checkbox" value="orders"> Orders</label>
+            <label style="font-weight:400"><input type="checkbox" value="sales"> Sales</label>
+            <label style="font-weight:400"><input type="checkbox" value="production"> Production</label>
+            <label style="font-weight:400"><input type="checkbox" value="masters"> Masters</label>
+            <label style="font-weight:400"><input type="checkbox" value="kartavya"> Kartavya</label>
+            <label style="font-weight:400"><input type="checkbox" value="ddr"> Daily Report</label>
+          </div>
           <button class="btn" id="btn-save">Save user</button>
+          <button class="btn ghost" id="btn-clear" style="margin-top:8px">Clear form / new user</button>
           <div class="msg" id="admin-msg"></div>
         </div>
       </div>
@@ -506,6 +517,20 @@ function drawInternal(){
 
   setCnt('c-ord',o.pos_overdue); setCnt('c-sal',s.not_quoted);
   setCnt('c-prd',pr.needs_review); setCnt('c-kar',(b.me||{}).tasks_overdue);
+  gateDash();
+}
+// ---- module-wise access: hide nav links & module cards the user cannot open ----
+function gateDash(){
+  const sup=ME&&ME.is_super_admin, mods=(ME&&ME.permissions&&ME.permissions.modules)||[];
+  const allow=k=>sup||mods.indexOf(k)!==-1;
+  document.querySelectorAll('.nv-a').forEach(a=>{
+    const k=(a.getAttribute('href')||'').replace(/^\.?\//,'').replace('.html','');
+    if(k&&k!=='index'&&!allow(k)) a.style.display='none';
+  });
+  document.querySelectorAll('.mod').forEach(a=>{
+    const k=(a.getAttribute('href')||'').replace(/^\.?\//,'').replace('.html','');
+    if(k&&!allow(k)) a.style.display='none';
+  });
 }
 function setCnt(id,v){const e=$(id); if(!e)return; if(v>0){e.textContent=v>99?'99+':v;e.style.display='flex';}else e.style.display='none';}
 
@@ -557,28 +582,48 @@ async function route(session){
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
   await refresh();
+  gateDash();
   if(ME.role==='DIRECTOR'||ME.role==='ADMIN'){$('admin-card').style.display='block';loadUsers();}
 }
 
+const MODLABEL={orders:'Orders',sales:'Sales',production:'Production',masters:'Masters',kartavya:'Kartavya',ddr:'Daily Report'};
+let USERS=[];
 async function loadUsers(){
   const{data,error}=await sb.rpc('users_list');
   if(error){$('user-list').textContent=error.message;return;}
-  $('user-list').innerHTML=`<table><thead><tr><th>Name</th><th>Email address</th><th>Role</th><th>Status</th></tr></thead><tbody>
-    ${data.map(u=>`<tr><td class="rowlbl">${esc(u.full_name)}${u.is_super_admin?' 🔒':''}</td>
+  USERS=data;
+  $('user-list').innerHTML=`<table><thead><tr><th>Name</th><th>Email address</th><th>Role</th><th>Modules</th><th>Status</th></tr></thead><tbody>
+    ${data.map(u=>{
+      const mods=(u.permissions_json&&u.permissions_json.modules)||[];
+      const modtxt=u.is_super_admin?'<span class="muted">All (super-admin)</span>'
+        :(mods.length?mods.map(m=>MODLABEL[m]||m).join(', '):'<span class="badge red">None</span>');
+      return `<tr style="cursor:pointer" title="Click to edit" onclick="fillForm('${esc(u.email)}')"><td class="rowlbl">${esc(u.full_name)}${u.is_super_admin?' 🔒':''}</td>
       <td>${esc(u.email)}</td>
       <td><span class="badge ${u.role==='DIRECTOR'?'amber':u.role==='ADMIN'?'blue':'green'}">${esc(u.role.charAt(0)+u.role.slice(1).toLowerCase())}</span></td>
-      <td>${u.is_active?'<span class="badge green">Active</span>':'<span class="badge red">Deactivated</span>'}</td></tr>`).join('')}
+      <td style="font-size:12.5px">${modtxt}</td>
+      <td>${u.is_active?'<span class="badge green">Active</span>':'<span class="badge red">Deactivated</span>'}</td></tr>`;}).join('')}
     </tbody></table>`;
+}
+function setMods(list){document.querySelectorAll('#u-mods input').forEach(c=>{c.checked=(list||[]).indexOf(c.value)!==-1;});}
+function getMods(){return [...document.querySelectorAll('#u-mods input:checked')].map(c=>c.value);}
+function clearForm(){$('u-email').value='';$('u-name').value='';$('u-role').value='STAFF';$('u-active').value='true';setMods([]);msg('admin-msg','','');}
+function fillForm(email){
+  const u=USERS.find(x=>x.email===email); if(!u)return;
+  $('u-email').value=u.email; $('u-name').value=u.full_name; $('u-role').value=u.role;
+  $('u-active').value=u.is_active?'true':'false';
+  setMods((u.permissions_json&&u.permissions_json.modules)||[]);
+  msg('admin-msg', u.is_super_admin?'Protected super-admin account — always has full access.':'Editing '+u.full_name+' — adjust and Save.','');
 }
 
 $('btn-save').onclick=async()=>{
   if(!ME||ME.role!=='DIRECTOR'){msg('admin-msg','Only a Director can save users.','err');return;}
-  const p={p_email:$('u-email').value,p_full_name:$('u-name').value,p_role:$('u-role').value,p_is_active:$('u-active').value==='true'};
+  const p={p_email:$('u-email').value,p_full_name:$('u-name').value,p_role:$('u-role').value,p_is_active:$('u-active').value==='true',p_permissions:{modules:getMods()}};
   if(!p.p_email||!p.p_full_name){msg('admin-msg','Email and name are both required.','err');return;}
   const{error}=await sb.rpc('user_save',p);
   if(error){msg('admin-msg',error.message,'err');return;}
-  msg('admin-msg','Saved.','ok');$('u-email').value='';$('u-name').value='';loadUsers();
+  msg('admin-msg','Saved.','ok');clearForm();loadUsers();
 };
+$('btn-clear').onclick=clearForm;
 
 document.addEventListener('keydown',e=>{if(e.key==='F5'&&!e.ctrlKey){e.preventDefault();refresh();}});
 sb.auth.getSession().then(({data})=>route(data.session));
