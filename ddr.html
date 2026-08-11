@@ -371,13 +371,8 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  var _sup=ME.is_super_admin, _mods=(ME.permissions&&ME.permissions.modules)||[];
-  document.querySelectorAll('.nv-a').forEach(function(a){
-    var k=(a.getAttribute('href')||'').replace(/^\.?\//,'').replace('.html','');
-    if(k&&k!=='index'&&k!=='ddr'&&!(_sup||_mods.indexOf(k)!==-1)) a.style.display='none';
-  });
-  if(!(_sup||_mods.indexOf('ddr')!==-1)){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Access not enabled.</b><div class="muted">The Director Daily Report carries financial figures. Your account has not been granted this module — please contact the Director.</div></div></div>';
+  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
     $('datesel').style.display='none';return;
   }
   await loadDates();
@@ -387,6 +382,26 @@ async function route(session){
 document.addEventListener('keydown',e=>{if(e.key==='F5'&&!e.ctrlKey){e.preventDefault();load($('datesel').value||undefined);}});
 sb.auth.getSession().then(({data})=>route(data.session));
 sb.auth.onAuthStateChange((_e,s)=>route(s));
+</script>
+<script>
+/* KSK access-aware sidebar: rebuild the module menu from my_modules() so that
+   module names, order and per-person visibility all follow the database grid.
+   Fails safe: on any error the existing static menu is left untouched. */
+(function(){
+  var HREF={sales:'sales.html',orders:'orders.html',production:'production.html',kartavya:'kartavya.html',ddr:'ddr.html',masters:'masters.html'};
+  var ICON={sales:'₹',orders:'▦',production:'⚙',kartavya:'✓',ddr:'▤',masters:'☰'};
+  async function render(){
+    var nav=document.querySelector('.ksk-sb .nv'); if(!nav) return;
+    var mods; try{ var r=await sb.rpc('my_modules'); mods=r&&r.data; }catch(e){ return; }
+    if(!mods) return;
+    var here=(location.pathname.split('/').pop()||'index.html');
+    var h='<a class="nv-a'+(here==='index.html'?' on':'')+'" href="./index.html"><span class="ic">▤</span><span>Dashboard</span></a>';
+    mods.forEach(function(m){ var href=HREF[m.key]||(m.key+'.html'); h+='<a class="nv-a'+(href===here?' on':'')+'" href="./'+href+'"><span class="ic">'+(ICON[m.key]||'▤')+'</span><span>'+m.label+'</span></a>'; });
+    nav.innerHTML=h;
+  }
+  function boot(){ if(typeof sb==='undefined'){ setTimeout(boot,300); return; } try{ sb.auth.onAuthStateChange(function(_e,s){ if(s) render(); }); }catch(e){} render(); }
+  boot();
+})();
 </script>
 </body>
 </html>

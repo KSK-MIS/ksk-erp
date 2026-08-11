@@ -150,22 +150,6 @@ function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'
 async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
 async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
 const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
-// ---- module-wise access gate (shared across ERP pages) ----
-function kskGate(mod){
-  var sup=ME&&ME.is_super_admin, mods=(ME&&ME.permissions&&ME.permissions.modules)||[];
-  document.querySelectorAll('.nv-a').forEach(function(a){
-    var k=(a.getAttribute('href')||'').replace(/^\.?\//,'').replace('.html','');
-    if(k&&k!=='index'&&!(sup||mods.indexOf(k)!==-1)) a.style.display='none';
-  });
-  var ok=sup||mods.indexOf(mod)!==-1;
-  if(!ok){
-    var h=document.querySelector('#main')||document.querySelector('#view')||document.querySelector('main');
-    if(h) h.innerHTML='<div style="max-width:520px;margin:44px auto;padding:22px 24px;border:1px solid #d8dee6;border-left:4px solid #c9a227;border-radius:6px;background:#fff">'+
-      '<h3 style="margin:0 0 6px;color:#12395f;font-size:16px">Access not enabled</h3>'+
-      '<p style="margin:0;color:#556;font-size:14px">Your account doesn’t have access to this module. Please contact the Director if you need it.</p></div>';
-  }
-  return ok;
-}
 
 /* ===== KSK sortable dense-table engine ===== */
 const KSKT={};
@@ -670,9 +654,28 @@ async function closePO(id){
   const {data,error} = await sb.rpc('my_profile');
   if(error || !data?.length){ location.href = './index.html'; return; }
   ME = data[0];
-  if(!kskGate('orders')){ $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role; return; }
   $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
   drawNav(); render.pending();
+})();
+</script>
+<script>
+/* KSK access-aware sidebar: rebuild the module menu from my_modules() so that
+   module names, order and per-person visibility all follow the database grid.
+   Fails safe: on any error the existing static menu is left untouched. */
+(function(){
+  var HREF={sales:'sales.html',orders:'orders.html',production:'production.html',kartavya:'kartavya.html',ddr:'ddr.html',masters:'masters.html'};
+  var ICON={sales:'₹',orders:'▦',production:'⚙',kartavya:'✓',ddr:'▤',masters:'☰'};
+  async function render(){
+    var nav=document.querySelector('.ksk-sb .nv'); if(!nav) return;
+    var mods; try{ var r=await sb.rpc('my_modules'); mods=r&&r.data; }catch(e){ return; }
+    if(!mods) return;
+    var here=(location.pathname.split('/').pop()||'index.html');
+    var h='<a class="nv-a'+(here==='index.html'?' on':'')+'" href="./index.html"><span class="ic">▤</span><span>Dashboard</span></a>';
+    mods.forEach(function(m){ var href=HREF[m.key]||(m.key+'.html'); h+='<a class="nv-a'+(href===here?' on':'')+'" href="./'+href+'"><span class="ic">'+(ICON[m.key]||'▤')+'</span><span>'+m.label+'</span></a>'; });
+    nav.innerHTML=h;
+  }
+  function boot(){ if(typeof sb==='undefined'){ setTimeout(boot,300); return; } try{ sb.auth.onAuthStateChange(function(_e,s){ if(s) render(); }); }catch(e){} render(); }
+  boot();
 })();
 </script>
 </body>
