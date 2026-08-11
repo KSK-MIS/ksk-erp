@@ -575,6 +575,7 @@ async function loadUsers(){
     </tbody></table>`;
 }
 
+const accCap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 async function loadAccessGrid(){
   const g=$('access-grid');
   const [mm,ml]=await Promise.all([sb.rpc('module_matrix_get'),sb.rpc('modules_list')]);
@@ -582,25 +583,51 @@ async function loadAccessGrid(){
   if(ml.error){g.textContent=ml.error.message;return;}
   const mods=ml.data||[], users=mm.data||[], lvls=['none','view','edit'];
   const rc=r=>r==='DIRECTOR'?'amber':r==='ADMIN'?'blue':'green';
-  const cell=(u,k)=>{
-    const cur=(u.access&&u.access[k])||'none';
+  const cell=(u,m)=>{
+    const k=m.key, cur=(u.access&&u.access[k])||'none';
     if(u.is_super_admin||u.role==='DIRECTOR'||u.role==='ADMIN')
       return '<td style="text-align:center"><span class="badge amber">Edit</span></td>';
-    return '<td style="text-align:center"><select class="acc" data-email="'+esc(u.email)+'" data-mod="'+esc(k)+'" onchange="setAccess(this)">'+
-      lvls.map(l=>'<option value="'+l+'"'+(cur===l?' selected':'')+'>'+l.charAt(0).toUpperCase()+l.slice(1)+'</option>').join('')+'</select></td>';
+    return '<td style="text-align:center"><select class="acc" data-email="'+esc(u.email)+'" data-name="'+esc(u.full_name)+'" data-mod="'+esc(k)+'" data-modlabel="'+esc(m.label)+'" data-orig="'+cur+'" onchange="markAccess(this)">'+
+      lvls.map(l=>'<option value="'+l+'"'+(cur===l?' selected':'')+'>'+accCap(l)+'</option>').join('')+'</select></td>';
   };
   g.innerHTML='<table><thead><tr><th>Person</th>'+mods.map(m=>'<th style="text-align:center">'+esc(m.label)+'</th>').join('')+'</tr></thead><tbody>'+
-    users.map(u=>'<tr><td class="rowlbl">'+esc(u.full_name)+' <span class="badge '+rc(u.role)+'">'+esc(u.role.charAt(0)+u.role.slice(1).toLowerCase())+'</span>'+(u.is_super_admin?' 🔒':'')+(u.is_active?'':' <span class="badge red">Off</span>')+'</td>'+mods.map(m=>cell(u,m.key)).join('')+'</tr>').join('')+
-    '</tbody></table><div class="muted" style="margin-top:8px;font-size:12px">Director &amp; Admin always have full access. Staff with Enquiry-to-Order, Pending Orders or Production automatically get at least View on Masters.</div><div class="msg" id="access-msg"></div>';
+    users.map(u=>'<tr><td class="rowlbl">'+esc(u.full_name)+' <span class="badge '+rc(u.role)+'">'+esc(accCap(u.role.toLowerCase()))+'</span>'+(u.is_super_admin?' 🔒':'')+(u.is_active?'':' <span class="badge red">Off</span>')+'</td>'+mods.map(m=>cell(u,m)).join('')+'</tr>').join('')+
+    '</tbody></table>'+
+    '<div style="margin-top:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">'+
+      '<button class="btn" id="acc-save" style="width:auto;margin:0;padding:8px 20px" disabled onclick="saveAccess()">Save changes</button>'+
+      '<span class="muted" id="acc-pending" style="font-size:12.5px">No unsaved changes.</span>'+
+    '</div>'+
+    '<div class="muted" style="margin-top:8px;font-size:12px">Change any dropdowns, review the list, then Save. Director &amp; Admin always have full access. Staff with Enquiry-to-Order, Pending Orders or Production automatically get at least View on Masters.</div>'+
+    '<div class="msg" id="access-msg"></div>';
+  accRefreshPending();
 }
-window.setAccess=async function(sel){
-  const email=sel.getAttribute('data-email'),mod=sel.getAttribute('data-mod'),level=sel.value;
-  sel.disabled=true;
-  const{error}=await sb.rpc('module_access_set',{p_email:email,p_module:mod,p_level:level});
-  sel.disabled=false;
-  const m=$('access-msg');
-  if(error){ if(m){m.textContent=error.message;m.className='msg err';} return; }
-  if(m){m.textContent='Saved: '+esc(email)+' · '+mod+' → '+level+'.';m.className='msg ok';}
+function accDirty(){ return Array.prototype.slice.call(document.querySelectorAll('#access-grid select.acc')).filter(function(s){return s.value!==s.getAttribute('data-orig');}); }
+function accRefreshPending(){
+  const d=accDirty(), btn=$('acc-save'), sum=$('acc-pending');
+  if(btn) btn.disabled = d.length===0;
+  if(sum) sum.innerHTML = d.length
+    ? d.length+' unsaved change'+(d.length>1?'s':'')+': '+d.map(function(s){return esc(s.getAttribute('data-name'))+' · '+esc(s.getAttribute('data-modlabel'))+' → <b>'+accCap(s.value)+'</b>';}).join('&nbsp; · &nbsp;')
+    : 'No unsaved changes.';
+}
+window.markAccess=function(sel){
+  const changed = sel.value!==sel.getAttribute('data-orig');
+  sel.style.borderColor = changed?'#c9a227':'';
+  sel.style.background  = changed?'#fff8e6':'';
+  accRefreshPending();
+};
+window.saveAccess=async function(){
+  const d=accDirty(); if(!d.length) return;
+  const btn=$('acc-save'), m=$('access-msg');
+  btn.disabled=true; d.forEach(function(s){s.disabled=true;});
+  if(m){m.textContent='Saving '+d.length+' change'+(d.length>1?'s':'')+'…';m.className='msg';}
+  let ok=0; const errs=[];
+  for(const s of d){
+    const r=await sb.rpc('module_access_set',{p_email:s.getAttribute('data-email'),p_module:s.getAttribute('data-mod'),p_level:s.value});
+    if(r.error) errs.push(esc(s.getAttribute('data-name'))+' · '+esc(s.getAttribute('data-modlabel'))+': '+esc(r.error.message)); else ok++;
+  }
+  if(m){ if(errs.length){m.innerHTML='Saved '+ok+'. Could not save:<br>'+errs.join('<br>');m.className='msg err';}
+         else {m.textContent='Saved '+ok+' change'+(ok>1?'s':'')+'.';m.className='msg ok';} }
+  loadAccessGrid();
 };
 
 $('btn-save').onclick=async()=>{
