@@ -81,6 +81,26 @@
   .badge.red{background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
   .badge.amber{background:var(--warn-bg);color:var(--warn);border-color:#e8c98a}
   .badge.green{background:var(--ok-bg);color:var(--ok);border-color:#a8d5b8}
+  /* ===== daily verification strip ===== */
+  .vbar{background:#fff;border:1px solid var(--line);border-left:4px solid var(--ink-3);border-radius:3px;padding:11px 14px;margin:0 0 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .vbar.st-verified{border-left-color:var(--ok);background:var(--ok-bg)}
+  .vbar.st-partial{border-left-color:var(--warn);background:var(--warn-bg)}
+  .vbar.st-unverified{border-left-color:var(--bad);background:var(--bad-bg)}
+  .vbar .vlbl{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-3)}
+  .vbar .vwho{font-size:12.5px;color:var(--ink-2)}
+  .vbar .vwho b{color:var(--ink)}
+  .vbar .vsp{margin-left:auto}
+  .vchecks{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .vchecks label{display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;white-space:nowrap}
+  .vchecks input{width:15px;height:15px;accent-color:var(--navy);cursor:pointer}
+  .vchecks label.done{color:var(--ok);font-weight:600}
+  .vpanel{background:#fff;border:1px solid var(--line);border-radius:3px;padding:13px 14px;margin:0 0 14px}
+  .vpanel .vh{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--navy);margin-bottom:9px}
+  .vpanel textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}
+  .vpanel .vact{display:flex;align-items:center;gap:9px;margin-top:10px;flex-wrap:wrap}
+  .vpanel .vmsg{font-size:12.5px}
+  .vpanel .vmsg.ok{color:var(--ok)} .vpanel .vmsg.err{color:var(--bad)}
+  .vlog{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.6}
   .card{background:#fff;border:1px solid var(--line);border-radius:3px;padding:20px;max-width:430px;margin:36px auto}
   .card h3{font-size:16px;color:var(--navy);margin-bottom:6px}
   .btn{width:100%;padding:9px;margin-top:14px;border:1px solid var(--navy);border-radius:3px;background:var(--navy);color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
@@ -97,6 +117,8 @@
     body.ksk-on{padding-left:0!important}
     main{max-width:100%;padding:0}
     .panel,.kpi{break-inside:avoid;box-shadow:none}
+    .vbar{break-inside:avoid;border:1pt solid #444;background:#fff!important}
+    .vpanel{display:none!important}
     h2.sec{break-after:avoid}
     .matrix{overflow:visible}
     @page{margin:12mm;size:A4 landscape}
@@ -189,7 +211,7 @@
     <span class="picker">Report date <select id="datesel" onchange="load(this.value)"></select></span>
     <div class="sep"></div>
     <button class="cmd" onclick="signOut()">Sign out</button>
-    <div class="asof">As on <b id="asof">&mdash;</b></div>
+    <div class="asof"><span class="badge" id="pending" style="margin-right:10px"></span>As on <b id="asof">&mdash;</b></div>
   </div>
   <main>
     <div id="body"><p class="muted" style="padding:40px;text-align:center">Loading the Director Daily Report&hellip;</p></div>
@@ -291,6 +313,68 @@ function insight(d,prev){
   return `<div class="insight">${bits.join(', ')}.${prodline}${flow}${tail}</div>`;
 }
 
+// ---------- daily verification ----------
+const VSECS=[['production','Production'],['stock','Stock'],['debtors','Debtors'],['advance','Advance & Creditors']];
+const STATUS_TXT={verified:'Verified',partial:'Partly verified',unverified:'Not yet verified'};
+
+function verifyBar(){
+  const st=REP.status||'unverified', ck=REP.checks||{};
+  const pending=VSECS.filter(([k])=>!ck[k]).map(([,l])=>l);
+  let who='';
+  if(st==='verified'){
+    who=`Checked by <b>${esc(REP.verified_by||'')}</b> on ${REP.verified_at?new Date(REP.verified_at).toLocaleString('en-IN'):''}`;
+  }else if(st==='partial'){
+    who=`Partly checked by <b>${esc(REP.verified_by||'')}</b> &middot; still open: <b>${esc(pending.join(', '))}</b>`;
+  }else{
+    who='No section has been checked against the source records yet.';
+  }
+  const badge=st==='verified'?'green':(st==='partial'?'amber':'red');
+  return `<div class="vbar st-${st}">
+      <span class="badge ${badge}">${STATUS_TXT[st]}</span>
+      <span class="vwho">${who}</span>
+      ${REP.verify_remarks?`<span class="vwho vsp">Checker's remark: <b>${esc(REP.verify_remarks)}</b></span>`:''}
+    </div>`;
+}
+
+function verifyPanel(){
+  if(!REP.can_verify) return '';
+  const ck=REP.checks||{};
+  return `<div class="vpanel noprint">
+      <div class="vh">Daily verification &mdash; tick each section you have checked against the source records</div>
+      <div class="vchecks">
+        ${VSECS.map(([k,l])=>`<label class="${ck[k]?'done':''}"><input type="checkbox" id="vc-${k}" ${ck[k]?'checked':''}> ${esc(l)}</label>`).join('')}
+      </div>
+      <textarea id="v-remarks" placeholder="Remarks — note anything that looked wrong, stale or unexplained (optional, but please write one if you leave a section unticked)">${esc(REP.verify_remarks||'')}</textarea>
+      <div class="vact">
+        <button class="cmd primary" id="v-save">&#10003; Record my verification</button>
+        <button class="cmd" id="v-all">Tick all four</button>
+        <span class="vmsg" id="v-msg"></span>
+      </div>
+      <div class="vlog">Your name and the time are recorded against this report. If the figures are rewritten afterwards, the sign-off is cleared automatically and the day needs re-checking.</div>
+    </div>`;
+}
+
+function wireVerify(){
+  if(!REP.can_verify) return;
+  const btn=$('v-save'); if(!btn) return;
+  $('v-all').onclick=()=>VSECS.forEach(([k])=>{$('vc-'+k).checked=true;$('vc-'+k).closest('label').classList.add('done');});
+  VSECS.forEach(([k])=>{const b=$('vc-'+k);b.onchange=()=>b.closest('label').classList.toggle('done',b.checked);});
+  btn.onclick=async()=>{
+    const checks={}; VSECS.forEach(([k])=>checks[k]=$('vc-'+k).checked);
+    const remarks=$('v-remarks').value.trim();
+    const none=Object.values(checks).every(v=>!v);
+    if(none&&!remarks){$('v-msg').className='vmsg err';$('v-msg').textContent='Tick what you have checked, or write a remark explaining what is wrong.';return;}
+    btn.disabled=true;$('v-msg').className='vmsg';$('v-msg').textContent='Saving…';
+    const {data,error}=await sb.rpc('ddr_verify',{p_date:REP.report_date,p_checks:checks,p_remarks:remarks||null});
+    btn.disabled=false;
+    if(error){$('v-msg').className='vmsg err';$('v-msg').textContent=error.message;return;}
+    Object.assign(REP,data||{});
+    $('v-msg').className='vmsg ok';$('v-msg').textContent='Recorded. Thank you.';
+    await loadDates(REP.report_date);
+    draw();
+  };
+}
+
 // ---------- draw ----------
 function draw(){
   const d=REP&&REP.data;
@@ -298,6 +382,8 @@ function draw(){
   const s=d.summary, p=PREV&&PREV.data&&PREV.data.summary;
   const chg=(cur,pre)=>{if(p==null||pre==null)return '';const v=cur-pre;const cls=v<0?'neg':'';return `<span class="num ${cls}" style="font-size:12px">${v>=0?'+':''}${money(v)}</span>`;};
   $('body').innerHTML=`
+    ${verifyBar()}
+    ${verifyPanel()}
     <h2 class="sec">Working capital &mdash; as on ${dl(REP.report_date)}</h2>
     <div class="kpis">
       <div class="kpi"><div class="lbl">Total deployed</div><div class="val">${money(s.total)}</div><div class="sub">${p!=null?('vs '+money(p.total)+' on '+dl(PREV.report_date)):''}</div></div>
@@ -320,6 +406,7 @@ function draw(){
         <tr class="total"><td>Total working capital deployed</td><td class="num">${money(s.total)}</td><td class="num">${p!=null?money(p.total):''}</td><td class="num ${chgCls(s.total,p&&p.total)}">${chgStr(s.total,p&&p.total)}</td></tr>
       </tbody></table></div>
     ${REP.source_note?`<p class="muted" style="margin:14px 2px">Source: ${esc(REP.source_note)}${REP.updated_at?(' · loaded '+new Date(REP.updated_at).toLocaleString('en-IN')):''}</p>`:''}`;
+  wireVerify();
 }
 function chgTxt(cur,pre){if(pre==null)return '';const v=cur-pre;return (v>=0?'+':'')+money(v)+' vs prev';}
 function chgStr(cur,pre){if(pre==null||pre===undefined)return '';const v=cur-pre;return (v>=0?'+':'')+money(v);}
@@ -328,7 +415,12 @@ function chgCls(cur,pre){if(pre==null||pre===undefined)return '';return (cur-pre
 // ---------- export ----------
 function exportExcel(){
   const rows=[];const push=(...c)=>rows.push(c);
-  push('KSK Engineering Industries Pvt. Ltd.');push('Director Daily Report');push('As on',dl(REP&&REP.report_date));push('');
+  push('KSK Engineering Industries Pvt. Ltd.');push('Director Daily Report');push('As on',dl(REP&&REP.report_date));
+  push('Verification',STATUS_TXT[(REP&&REP.status)||'unverified']||'');
+  push('Checked by',(REP&&REP.verified_by)||'—','on',REP&&REP.verified_at?new Date(REP.verified_at).toLocaleString('en-IN'):'—');
+  if(REP&&REP.checks) push('Sections checked',VSECS.filter(([k])=>REP.checks[k]).map(([,l])=>l).join('; ')||'none');
+  if(REP&&REP.verify_remarks) push("Checker's remark",REP.verify_remarks);
+  push('');
   document.querySelectorAll('#body table').forEach(t=>{
     const cap=t.closest('.panel')?.querySelector('.phead')?.childNodes[0]?.textContent?.trim();
     if(cap)push(cap);
@@ -357,10 +449,17 @@ async function load(date){
   }
   draw();
 }
+const STATUS_MARK={verified:'✓',partial:'–',unverified:'• unchecked'};
 async function loadDates(sel){
   const {data,error}=await sb.rpc('ddr_dates');
   if(error||!data)return;
-  $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${dl(r.report_date)}</option>`).join('');
+  $('datesel').innerHTML=data.map(r=>{
+    const mark=STATUS_MARK[r.status]||'';
+    return `<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${dl(r.report_date)}${mark?'  '+mark:''}</option>`;
+  }).join('');
+  const open=data.filter(r=>r.status!=='verified').length;
+  $('pending').textContent = open ? open+' day'+(open===1?'':'s')+' awaiting verification' : 'All days verified';
+  $('pending').className = 'badge '+(open?'amber':'green');
 }
 
 async function route(session){
