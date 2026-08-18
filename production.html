@@ -196,7 +196,7 @@ function kskTable(id,cols,rows,opts){
   return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
 }
 
-const TABS=[['daily','Daily'],['prod','Products'],['recv','Receipts'],['sup','Suppliers']];
+const TABS=[['daily','Daily'],['prod','Products'],['fab','Fabrication'],['recv','Receipts'],['sup','Suppliers']];
 function drawNav(){ $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join(''); }
 function go(t){ TAB=t; drawNav(); render[t](); }
 const render={};
@@ -418,6 +418,37 @@ render.sup = async () => {
   if(isAdmin()) cols.push({label:'Value', num:true, get:s=>s.value, cell:s=>s.value!=null?cr(s.value):'—'});
   $('#main').innerHTML = `<p class="muted" style="margin:0 4px 10px">One row per supplier name as written in the Factory Report — names are not yet mastered, so the same supplier spelled two ways appears twice. Click a column to sort.</p>` +
     kskTable('t-sup', cols, SUPP, {sortCol:isAdmin()?5:1, sortDir:-1});
+};
+
+let FAB=[];
+// ================= FABRICATION (pieces) — Fish Plate + Metal Liner =================
+render.fab = async () => {
+  $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
+  if(!FAB.length) FAB = await q('v_fabrication', x=>x.order('prod_date',{ascending:false}));
+  const by={};
+  FAB.forEach(r=>{ const d=by[r.prod_date]||(by[r.prod_date]={prod_date:r.prod_date,fp:null,ml:null,fpd:null,mld:null});
+    if(r.division==='FISH_PLATE'){ d.fp=Number(r.pcs); d.fpd=r.drawing_no; }
+    else if(r.division==='METAL_LINER'){ d.ml=Number(r.pcs); d.mld=r.drawing_no; } });
+  const rows=Object.values(by);
+  const sum=div=>FAB.filter(r=>r.division===div).reduce((s,r)=>s+Number(r.pcs||0),0);
+  const fpTot=sum('FISH_PLATE'), mlTot=sum('METAL_LINER');
+  const cols=[
+    {label:'Date', get:r=>r.prod_date, sort:r=>r.prod_date, cell:r=>fmt(r.prod_date)},
+    {label:'Fish Plate', get:r=>r.fpd||''},
+    {label:'FP pcs', num:true, get:r=>r.fp, cell:r=>r.fp==null?'—':num(r.fp)},
+    {label:'Metal Liner', get:r=>r.mld||''},
+    {label:'ML pcs', num:true, get:r=>r.ml, cell:r=>r.ml==null?'—':num(r.ml)},
+    {label:'Total pcs', num:true, get:r=>Number(r.fp||0)+Number(r.ml||0), cell:r=>num(Number(r.fp||0)+Number(r.ml||0))},
+  ];
+  $('#main').innerHTML = `
+    <div class="kpi">
+      <div><b>${num(mlTot)}</b><span>Metal Liner pcs (recorded)</span></div>
+      <div><b>${num(fpTot)}</b><span>Fish Plate pcs (recorded)</span></div>
+      <div><b>${num(fpTot+mlTot)}</b><span>Total finished pcs</span></div>
+    </div>
+    <h2>Finished pieces by day</h2>
+    <p class="muted" style="margin:0 4px 10px">Two finishing divisions, counted in pieces. Metal Liner = stamped liners (VKS + TLN contractors); Fish Plate = finished plates. Rolling-mill tonnage is on the Daily tab. Click a column to sort.</p>
+    ` + kskTable('t-fab', cols, rows, {sortCol:0, sortDir:-1});
 };
 
 // ---- boot ----
