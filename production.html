@@ -438,13 +438,11 @@ render.fab = async () => {
     {label:'FP pcs', num:true, get:r=>r.fp, cell:r=>r.fp==null?'—':num(r.fp)},
     {label:'Metal Liner', get:r=>r.mld||''},
     {label:'ML pcs', num:true, get:r=>r.ml, cell:r=>r.ml==null?'—':num(r.ml)},
-    {label:'Total pcs', num:true, get:r=>Number(r.fp||0)+Number(r.ml||0), cell:r=>num(Number(r.fp||0)+Number(r.ml||0))},
   ];
   $('#main').innerHTML = `
     <div class="kpi">
       <div><b>${num(mlTot)}</b><span>Metal Liner pcs (recorded)</span></div>
       <div><b>${num(fpTot)}</b><span>Fish Plate pcs (recorded)</span></div>
-      <div><b>${num(fpTot+mlTot)}</b><span>Total finished pcs</span></div>
     </div>
     <h2>Finished pieces by day</h2>
     <p class="muted" style="margin:0 4px 10px">Two finishing divisions, counted in pieces. Metal Liner = stamped liners (VKS + TLN contractors); Fish Plate = finished plates. Rolling-mill tonnage is on the Daily tab. Click a column to sort.</p>
