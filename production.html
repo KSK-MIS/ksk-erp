@@ -154,7 +154,7 @@ table.dtbl td b{ color:#182b45; }
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 const $ = s => document.querySelector(s);
-let ME=null, TAB='daily', DAYS=[], PRODS=[], MONTHS=[], RECV=[], SUPP=[], DF='all', RF='all';
+let ME=null, TAB='daily', DAYS=[], PRODS=[], MONTHS=[], RECV=[], SUPP=[], NACK=[], DF='all', RF='all';
 const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
 const fmtM = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}) : '—';
@@ -196,7 +196,7 @@ function kskTable(id,cols,rows,opts){
   return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
 }
 
-const TABS=[['daily','Daily'],['prod','Products'],['fab','Fabrication'],['recv','Receipts'],['sup','Suppliers']];
+const TABS=[['daily','Daily'],['prod','Products'],['fab','Fabrication'],['sup','Suppliers']];
 function drawNav(){ $('#nav').innerHTML = TABS.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join(''); }
 function go(t){ TAB=t; drawNav(); render[t](); }
 const render={};
@@ -218,6 +218,17 @@ function dayDlg(d){
     </table>
     ${x.note?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
       <div class="t-sub" style="color:#6b4700">${esc(x.note)}</div></div>`:''}
+    ${(x.needs_review||x.checked)?`<div class="card" style="box-shadow:none;background:#fff8ec;border:1px solid #ffd699;margin-top:10px">
+      <div class="t-title" style="color:#8a5a00">${x.checked?'Checked':'Flagged for checking'}</div>
+      <div class="t-sub">Figures that don't add up in the sheet, or a blank cell. Verify it, add a comment if useful, and mark it checked to clear the notification.</div>
+      ${x.checked?`<div class="t-sub" style="margin-top:6px;color:#1e7e34">✓ Marked checked${x.check_note?' — '+esc(x.check_note):''}</div>`:''}
+      ${isAdmin()?`<label>Comment (optional)</label><textarea id="chk-note" rows="2" placeholder="What did you verify or correct?">${esc(x.check_note||'')}</textarea>
+        <div class="row" style="margin-top:8px">
+          ${x.checked
+            ? `<button class="a" onclick="checkDay('${x.prod_date}',false)">Reopen</button><button class="a dark" onclick="checkDay('${x.prod_date}',true)">Update comment</button>`
+            : `<button class="a dark grow" onclick="checkDay('${x.prod_date}',true)">Mark as checked</button>`}
+        </div>`:''}
+    </div>`:''}
     <div class="row" style="margin-top:12px">
       ${isAdmin()?`<button class="a gold grow" onclick="editDay('${x.prod_date}')">Correct this day</button>`:''}
       <button class="a" onclick="dlg.close()">Close</button></div>`;
@@ -248,19 +259,38 @@ function editDay(d){
   };
   $('#dlg').showModal();
 }
+async function checkDay(d, checked){
+  const el = document.getElementById('chk-note');
+  const note = el ? (el.value.trim()||null) : null;
+  await rpc('production_day_check', { p_date:d, p_note:note, p_checked:checked });
+  toast(checked?'Marked as checked':'Reopened'); $('#dlg').close();
+  DAYS=[]; render.daily();
+}
+async function ackZeroMonths(){
+  const note = ($('#zm-note')?.value||'').trim()||null;
+  const acked = new Set(NACK.map(a=>a.notice_key));
+  const keys = MONTHS.filter(m=>Number(m.total_mt)===0).map(m=>'zeromonth:'+m.month).filter(k=>!acked.has(k));
+  for(const k of keys){ await rpc('production_notice_ack', { p_key:k, p_note:note, p_acked:true }); }
+  toast('Marked as seen'); DAYS=[]; MONTHS=[]; NACK=[]; render.daily();
+}
+async function reopenZeroMonths(){
+  const keys = MONTHS.filter(m=>Number(m.total_mt)===0).map(m=>'zeromonth:'+m.month);
+  for(const k of keys){ await rpc('production_notice_ack', { p_key:k, p_note:null, p_acked:false }); }
+  toast('Reopened'); DAYS=[]; MONTHS=[]; NACK=[]; render.daily();
+}
 function dFilter(f){ DF=f; dDraw(); }
 function dDraw(){
   const pass = d => DF==='all' ? true
     : DF==='prod'   ? d.status==='PRODUCTION'
     : DF==='off'    ? d.status==='LAY_OFF'
-    : DF==='review' ? d.needs_review : true;
+    : DF==='review' ? (d.needs_review && !d.checked) : true;
   ['all','prod','off','review'].forEach(k=>$('#d-'+k)?.classList.remove('dark'));
   $('#d-'+DF)?.classList.add('dark');
   const list = DAYS.filter(pass);
   const nf = (v,dp)=> v==null ? '—' : Number(v).toLocaleString('en-IN',{maximumFractionDigits:dp});
   const cols=[
     {label:'Date', sort:d=>d.prod_date, cell:d=>fmt(d.prod_date)},
-    {label:'Status', get:d=>d.status, cell:d=>`<span class="tag ${d.status}">${LABEL[d.status]}</span>${d.needs_review?' <span class="tag review">CHECK</span>':''}`},
+    {label:'Status', get:d=>d.status, cell:d=>`<span class="tag ${d.status}">${LABEL[d.status]}</span>${d.needs_review&&!d.checked?' <span class="tag review">CHECK</span>':''}${d.checked?' <span class="tag" style="background:#e6f4ea;color:#1e7e34">✓ checked</span>':''}`},
     {label:'Product', cls:()=>'wrap', get:d=>d.product_name||LABEL[d.status],
       cell:d=>d.status==='PRODUCTION'?esc(d.product_name||'—'):`<span class="muted">${LABEL[d.status]}</span>`},
     {label:'Drawing', get:d=>d.drawing_no||'', cell:d=>esc(d.drawing_no||'—')},
@@ -276,13 +306,18 @@ render.daily = async () => {
   $('#main').innerHTML = '<p class="muted" style="padding:30px;text-align:center">Loading…</p>';
   if(!DAYS.length)   DAYS   = await q('v_production', x=>x.order('prod_date'));
   if(!MONTHS.length) MONTHS = await q('v_production_months', x=>x.order('month'));
+  NACK = await q('v_prod_notice_ack');
   const prodDays = DAYS.filter(d=>d.status==='PRODUCTION').length;
   const layoff   = DAYS.filter(d=>d.status==='LAY_OFF').length;
   const total    = DAYS.reduce((a,b)=>a+Number(b.qty_mt||0),0);
   const working  = DAYS.filter(d=>d.status!=='WEEKLY_OFF').length;
   const util     = Math.round(100*prodDays/Math.max(1,working));
   const maxMt    = Math.max(...MONTHS.map(m=>Number(m.total_mt||0)), 1);
-  const review   = DAYS.filter(d=>d.needs_review).length;
+  const review   = DAYS.filter(d=>d.needs_review && !d.checked).length;
+  const ackSet   = new Set(NACK.map(a=>a.notice_key));
+  const zUnacked = MONTHS.filter(m=>Number(m.total_mt)===0 && !ackSet.has('zeromonth:'+m.month));
+  const zAcked   = MONTHS.filter(m=>Number(m.total_mt)===0 && ackSet.has('zeromonth:'+m.month));
+  const zAckNote = (NACK.find(a=>a.note && zAcked.some(m=>'zeromonth:'+m.month===a.notice_key))||{}).note||'';
 
   $('#main').innerHTML = `
     <div class="kpi">
@@ -312,13 +347,19 @@ render.daily = async () => {
         <div style="width:44px;text-align:right;font-size:11px;color:${Number(m.utilisation_pct)<70?'#b02a37':'#778'}">${m.utilisation_pct}%</div>
       </div>`).join('')}
     </div>
-    ${MONTHS.some(m=>Number(m.total_mt)===0)?`<div class="card" style="border-left:3px solid var(--bad)">
-      <div class="t-title">${MONTHS.filter(m=>Number(m.total_mt)===0).map(m=>fmtM(m.month)).join(', ')}: nothing was rolled</div>
-      <div class="t-sub">The mill did not run at all. The sheet records the lay-off but never says why — no reason is captured anywhere in the source. Open any day and add one; it is the single most useful thing missing from this data.</div>
+    ${zUnacked.length?`<div class="card" style="border-left:3px solid var(--bad)">
+      <div class="t-title">${zUnacked.map(m=>fmtM(m.month)).join(', ')}: nothing was rolled</div>
+      <div class="t-sub">The mill did not run at all. The sheet records the lay-off but never says why. Add a note and mark it seen to clear this from the dashboard.</div>
+      ${isAdmin()?`<label>Note (optional)</label><input id="zm-note" placeholder="e.g. planned maintenance shutdown, no orders">
+        <div style="margin-top:8px"><button class="a dark" onclick="ackZeroMonths()">Mark as seen</button></div>`:''}
+    </div>`:''}
+    ${zAcked.length?`<div class="card" style="box-shadow:none;background:#f4faf5;border:1px solid #cfe8d5">
+      <div class="t-sub" style="color:#1e7e34">✓ Seen: ${zAcked.map(m=>fmtM(m.month)).join(', ')} — no production${zAckNote?`. Note: ${esc(zAckNote)}`:''}
+        ${isAdmin()?`&nbsp; <a href="#" onclick="reopenZeroMonths();return false" style="color:#667">undo</a>`:''}</div>
     </div>`:''}
     ${review?`<div class="card" style="border-left:3px solid var(--warn)">
       <div class="t-title">${review} days need checking</div>
-      <div class="t-sub">Figures that don't add up in the source, or a blank cell. Nothing was guessed — open them and say what's right.</div>
+      <div class="t-sub">Figures that don't add up in the source, or a blank cell. Nothing was guessed — open each one, add a comment, and mark it checked.</div>
       <div style="margin-top:8px"><button class="a dark" onclick="dFilter('review')">Show them</button></div>
     </div>`:''}
 
