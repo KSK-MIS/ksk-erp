@@ -81,6 +81,39 @@
   .badge.red{background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
   .badge.amber{background:var(--warn-bg);color:var(--warn);border-color:#e8c98a}
   .badge.green{background:var(--ok-bg);color:var(--ok);border-color:#a8d5b8}
+  /* ----- maker / checker / approver chain ----- */
+  .vfy{background:#fff;border:1px solid var(--line);border-left:4px solid var(--ink-3);border-radius:3px;margin:14px 0 4px}
+  .vfy.ok{border-left-color:var(--ok);border-color:#a8d5b8}
+  .vfy.part{border-left-color:var(--warn);border-color:#e8c98a}
+  .vfy.no{border-left-color:var(--bad);border-color:#f0b3ab}
+  .vfy .vhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line-2);background:var(--head)}
+  .vfy.ok .vhead{background:var(--ok-bg)} .vfy.part .vhead{background:var(--warn-bg)} .vfy.no .vhead{background:var(--bad-bg)}
+  .vfy .vhead b{font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.7px}
+  .vfy .vwho{margin-left:auto;font-size:12px;color:var(--ink-2)}
+  .vstep{display:flex;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
+  .vstep:last-child{border-bottom:0}
+  .vstep .vnum{flex:0 0 24px;height:24px;border-radius:50%;background:#fff;border:1.5px solid var(--line);
+    color:var(--ink-3);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .vstep.done .vnum{background:var(--ok);border-color:var(--ok);color:#fff}
+  .vstep.now .vnum{background:var(--navy);border-color:var(--navy);color:#fff}
+  .vstep .vb{flex:1;min-width:0}
+  .vstep .vt{font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px}
+  .vstep .vby{font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-3);font-size:12.5px;margin-left:8px}
+  .vrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px;padding:7px 10px;border:1px solid var(--line-2);border-radius:3px;background:#fafbfc}
+  .vrow.mine{background:#fff;border-color:var(--navy);box-shadow:inset 3px 0 0 var(--gold)}
+  .vrow .vnm{font-size:13px;font-weight:600;min-width:132px}
+  .vrow .vst{margin-left:auto;font-size:12px;color:var(--ink-3);white-space:nowrap}
+  .vfy label.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;cursor:pointer;color:var(--ink-2)}
+  .vfy label.chk input{width:14px;height:14px;accent-color:var(--navy);cursor:pointer}
+  .vfy label.chk input:disabled{cursor:default;opacity:.55}
+  .vfy textarea{width:100%;margin-top:8px;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:13px;resize:vertical;min-height:46px;background:#fff;color:var(--ink)}
+  .vfy .vact{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+  .vfy .vmsg{font-size:12.5px;color:var(--ink-2)}
+  .vfy .cmd.warn{background:var(--warn);border-color:var(--warn);color:#fff}
+  .vfy .cmd.warn:hover{background:#8a4e06}
+  .vfy .vrem{margin-top:8px;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:3px;padding:8px 10px;line-height:1.5}
+  .vfy .vrem b{color:var(--warn)}
+  .vfy .vrem.alert{background:var(--bad-bg);border-color:#f0b3ab} .vfy .vrem.alert b{color:var(--bad)}
   .card{background:#fff;border:1px solid var(--line);border-radius:3px;padding:20px;max-width:430px;margin:36px auto}
   .card h3{font-size:16px;color:var(--navy);margin-bottom:6px}
   .btn{width:100%;padding:9px;margin-top:14px;border:1px solid var(--navy);border-radius:3px;background:var(--navy);color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
@@ -99,6 +132,8 @@
     .panel,.kpi{break-inside:avoid;box-shadow:none}
     h2.sec{break-after:avoid}
     .matrix{overflow:visible}
+    .vfy textarea,.vfy .vact{display:none!important}
+    .vfy{break-inside:avoid;background:#fff!important}
     @page{margin:12mm;size:A4 landscape}
   }
   /* ===== KSK desktop shell ===== */
@@ -291,6 +326,120 @@ function insight(d,prev){
   return `<div class="insight">${bits.join(', ')}.${prodline}${flow}${tail}</div>`;
 }
 
+// ---------- maker / checker / approver chain ----------
+/* Prepared by the maker, checked section by section by every named checker,
+   then signed off by the Director. Who may do what is decided in Postgres by
+   app.ddr_role() — the controls below only mirror it. */
+const VSEC=[['production','Production'],['stock','Stock'],['debtors','Debtors'],['advance','Advance & Creditors']];
+const STG={
+  draft:           {t:'Not submitted',        c:'no',   b:'red'},
+  prepared:        {t:'Awaiting checking',    c:'part', b:'amber'},
+  checking:        {t:'Partly checked',       c:'part', b:'amber'},
+  checked:         {t:'Checked — awaiting sign-off', c:'part', b:'amber'},
+  signed:          {t:'Signed off',           c:'ok',   b:'green'},
+  signed_override: {t:'Signed off — override',c:'part', b:'amber'}
+};
+const dts=t=>t?new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+const so=(stage,email)=>(REP.signoffs||[]).find(s=>s.stage===stage&&(!email||s.actor_email===email));
+const allTicked=s=>!!s&&VSEC.every(([k])=>(s.sections||{})[k]===true);
+
+function verifyBlock(){
+  if(!REP) return '';
+  const st=STG[REP.stage]||STG.draft;
+  const me=(REP.my_email||'').toLowerCase(), role=REP.my_ddr_role;
+  const prep=so('prepare'), appr=so('approve'), checkers=REP.checkers||[];
+
+  // --- step 1: prepared ---
+  const s1mine=(role==='maker'||role==='approver');
+  const s1=`<li class="vstep ${prep?'done':'now'}">
+    <span class="vnum">${prep?'&#10003;':'1'}</span>
+    <div class="vb">
+      <div class="vt">Prepared<span class="vby">${prep?esc(prep.actor_name)+' &middot; '+dts(prep.at):'not yet submitted for checking'}</span></div>
+      ${prep&&prep.remarks?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
+      ${s1mine?`<textarea id="p-rem" placeholder="Note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
+        <div class="vact"><button class="cmd primary" id="p-save">${prep?'Update submission':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
+    </div></li>`;
+
+  // --- step 2: checked, one row per checker ---
+  const rows=checkers.map(c=>{
+    const row=so('check',c.email), mine=(c.email===me&&role==='checker'), ok=allTicked(row);
+    const boxes=VSEC.map(([k,t])=>
+      `<label class="chk"><input type="checkbox" ${mine?`id="c-${k}"`:''} ${((row&&row.sections)||{})[k]?'checked':''} ${mine?'':'disabled'}><span>${t}</span></label>`).join('');
+    const state=ok?'<span class="badge green">Checked</span>'
+              :row?'<span class="badge amber">Queried</span>'
+                  :'<span class="vst">not yet checked</span>';
+    return `<div class="vrow ${mine?'mine':''}">
+        <span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>${boxes}
+        <span class="vst">${row?dts(row.at):''}</span>${state}
+      </div>
+      ${row&&row.remarks?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
+      ${mine?`<textarea id="c-rem" placeholder="Remark — say what does not tie to source, and to what">${esc(row&&row.remarks||'')}</textarea>
+        <div class="vact"><button class="cmd primary" id="c-save">Save my check</button><span class="vmsg" id="c-msg"></span>
+        ${prep?'':'<span class="vmsg">Waiting on the preparer to submit.</span>'}</div>`:''}`;
+  }).join('');
+  const s2 = `<li class="vstep ${REP.stage==='checked'||REP.stage==='signed'||REP.stage==='signed_override'?'done':(prep?'now':'')}">
+    <span class="vnum">${REP.stage==='checked'||REP.stage==='signed'||REP.stage==='signed_override'?'&#10003;':'2'}</span>
+    <div class="vb"><div class="vt">Checked<span class="vby">both checkers must clear all four sections</span></div>
+    ${rows||'<div class="vst">No checkers are configured.</div>'}</div></li>`;
+
+  // --- step 3: signed off ---
+  const s3mine=(role==='approver');
+  const ready=(REP.stage==='checked');
+  const s3=`<li class="vstep ${appr?'done':(ready?'now':'')}">
+    <span class="vnum">${appr?'&#10003;':'3'}</span>
+    <div class="vb">
+      <div class="vt">Signed off<span class="vby">${appr?esc(appr.actor_name)+' &middot; '+dts(appr.at)+(appr.is_override?' &middot; before checking was complete':''):(ready?'ready for the Director':'waiting on the checkers')}</span></div>
+      ${appr&&appr.remarks?`<div class="vrem"><b>Director:</b> ${esc(appr.remarks)}</div>`:''}
+      ${appr&&appr.is_override?`<div class="vrem alert"><b>Signed without a complete check.</b> This was recorded as an override in the log.</div>`:''}
+      ${s3mine?`<textarea id="a-rem" placeholder="Remark on sign-off (optional)">${esc(appr&&appr.remarks||'')}</textarea>
+        <div class="vact">
+          <button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>
+          ${(REP.signoffs||[]).length?'<button class="cmd" id="a-reopen">Reopen</button>':''}
+          <span class="vmsg" id="a-msg"></span></div>`:''}
+    </div></li>`;
+
+  const reset=(REP.last_reset&&REP.stage!=='signed')
+    ? `<div style="padding:0 14px 12px"><div class="vrem alert"><b>Figures were rewritten after this day had been actioned.</b> ${esc(REP.last_reset.remarks||'')} (${dts(REP.last_reset.at)})</div></div>`:'';
+
+  return `<div class="vfy ${st.c}">
+    <div class="vhead"><b>Verification</b><span class="badge ${st.b}">${st.t}</span>
+      <span class="vwho">${role?'You are the '+esc(role==='maker'?'preparer':role==='checker'?'checker':'approver'):'You are viewing this read-only'}</span></div>
+    <ol class="vsteps" style="list-style:none">${s1}${s2}${s3}</ol>${reset}</div>`;
+}
+
+async function callStage(btn,msg,fn,args){
+  const b=$(btn); if(!b) return;
+  b.disabled=true; $(msg).textContent='Saving…';
+  const {data,error}=await sb.rpc(fn,args);
+  if(error){b.disabled=false;$(msg).textContent=error.message;return;}
+  REP=data; draw(); loadDates(REP.report_date);
+}
+
+function wireVerify(){
+  if($('p-save')) $('p-save').onclick=()=>
+    callStage('p-save','p-msg','ddr_prepare',{p_date:REP.report_date,p_remarks:$('p-rem').value});
+
+  if($('c-save')) $('c-save').onclick=()=>{
+    const sec={}; VSEC.forEach(([k])=>{sec[k]=!!($('c-'+k)&&$('c-'+k).checked);});
+    if(!VSEC.every(([k])=>sec[k]) && !$('c-rem').value.trim()){
+      $('c-msg').textContent='Please say what is wrong before leaving a section unticked.';return;
+    }
+    callStage('c-save','c-msg','ddr_check',{p_date:REP.report_date,p_sections:sec,p_remarks:$('c-rem').value});
+  };
+
+  if($('a-save')) $('a-save').onclick=()=>{
+    const over=(REP.stage!=='checked');
+    if(over&&!confirm('Checking is not complete for this day. Sign off anyway? This will be recorded as an override.')) return;
+    callStage('a-save','a-msg','ddr_approve',{p_date:REP.report_date,p_remarks:$('a-rem').value,p_override:over});
+  };
+
+  if($('a-reopen')) $('a-reopen').onclick=()=>{
+    const why=prompt('Reopening clears every sign-off on this day and sends it back to the preparer.\n\nReason:');
+    if(!why||!why.trim()) return;
+    callStage('a-reopen','a-msg','ddr_reopen',{p_date:REP.report_date,p_reason:why});
+  };
+}
+
 // ---------- draw ----------
 function draw(){
   const d=REP&&REP.data;
@@ -306,6 +455,7 @@ function draw(){
       <div class="kpi ${s.advance_net<0?'amber':''}"><div class="lbl">Advance (net)</div><div class="val">${money(s.advance_net)}</div><div class="sub">${s.advance_net<0?'Net creditor position':'Advance to creditors'}</div></div>
     </div>
     ${insight(d,PREV&&PREV.data)}
+    ${verifyBlock()}
     ${matrix('Production, Inward & Outward', d.production&&d.production.reason?('Deviation: '+d.production.reason):'', d.production||{cols:[],rows:[]}, {uom:true})}
     ${matrix('Stock', 'Source: Tally', d.stock||{cols:[],rows:[]}, {})}
     ${matrix('Debtors', 'Gross less advances and bill discounting', d.debtors||{cols:[],rows:[]}, {})}
@@ -320,6 +470,7 @@ function draw(){
         <tr class="total"><td>Total working capital deployed</td><td class="num">${money(s.total)}</td><td class="num">${p!=null?money(p.total):''}</td><td class="num ${chgCls(s.total,p&&p.total)}">${chgStr(s.total,p&&p.total)}</td></tr>
       </tbody></table></div>
     ${REP.source_note?`<p class="muted" style="margin:14px 2px">Source: ${esc(REP.source_note)}${REP.updated_at?(' · loaded '+new Date(REP.updated_at).toLocaleString('en-IN')):''}</p>`:''}`;
+  wireVerify();
 }
 function chgTxt(cur,pre){if(pre==null)return '';const v=cur-pre;return (v>=0?'+':'')+money(v)+' vs prev';}
 function chgStr(cur,pre){if(pre==null||pre===undefined)return '';const v=cur-pre;return (v>=0?'+':'')+money(v);}
@@ -360,7 +511,8 @@ async function load(date){
 async function loadDates(sel){
   const {data,error}=await sb.rpc('ddr_dates');
   if(error||!data)return;
-  $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${dl(r.report_date)}</option>`).join('');
+  const MARK={draft:'○',prepared:'◔',checking:'◑',checked:'◕',signed:'✓',signed_override:'!'};
+  $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${MARK[r.stage]||'○'} ${dl(r.report_date)}</option>`).join('');
 }
 
 async function route(session){
