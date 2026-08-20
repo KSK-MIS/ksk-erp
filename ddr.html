@@ -515,6 +515,15 @@ async function loadDates(sel){
   $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${MARK[r.stage]||'○'} ${dl(r.report_date)}</option>`).join('');
 }
 
+/* Who may open the Daily Report. Must mirror app.module_level('ddr') in Postgres:
+   gating on job title alone locked the named checkers out of report history. */
+function canViewDDR(me){
+  if(!me) return false;
+  if(me.is_super_admin||me.role==='DIRECTOR'||me.role==='ADMIN') return true;
+  var lvl=((me.permissions||{}).access||{}).ddr;
+  return lvl==='view'||lvl==='edit';
+}
+
 async function route(session){
   if(!session){show('screen-login');return;}
   const{data,error}=await sb.rpc('my_profile');
@@ -523,8 +532,8 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
+  if(!canViewDDR(ME)){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures. Ask the Director if you need access.</div></div></div>';
     $('datesel').style.display='none';return;
   }
   await loadDates();
