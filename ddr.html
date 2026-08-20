@@ -382,15 +382,34 @@ function grid(row,editable,id){
     return `<tr class="${ok?'':(nt.correct||nt.note?'q':'')}">
       <td class="rowlbl">${t}</td>
       <td class="num dim">${reported(k)}</td>
-      <td><input type="checkbox" ${editable?`id="${id}-t-${k}"`:''} ${ok?'checked':''} ${editable?'':'disabled'}></td>
-      <td>${editable?`<input class="vin" id="${id}-c-${k}" value="${esc(nt.correct||'')}" placeholder="correct figure">`
+      <td><input type="checkbox" ${editable?`id="${id}-t-${k}" onchange="secSync('${id}','${k}')"`:''} ${ok?'checked':''} ${editable?'':'disabled'}></td>
+      <td>${editable?`<input class="vin" id="${id}-c-${k}" value="${esc(nt.correct||'')}" placeholder="only if not OK" ${ok?'disabled':''}>`
                     :(nt.correct?`<b>${esc(nt.correct)}</b>`:'')}</td>
-      <td>${editable?`<input class="vin" id="${id}-n-${k}" value="${esc(nt.note||'')}" placeholder="what is wrong">`
+      <td>${editable?`<input class="vin" id="${id}-n-${k}" value="${esc(nt.note||'')}" placeholder="only if not OK" ${ok?'disabled':''}>`
                     :esc(nt.note||'')}</td></tr>`;
   }).join('');
   return `<table class="vgrid"><thead><tr>
       <th style="width:24%">Section</th><th style="width:16%">Reported</th><th style="width:6%">OK</th>
       <th style="width:22%">Correct figure</th><th>Remark</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* Ticking OK means the figure is right, so the correct-figure and remark boxes
+   are irrelevant: clear and lock them. Unticking re-opens them, because they are
+   then the only way to say what is wrong. */
+function secSync(id,k){
+  const t=$(id+'-t-'+k);
+  if(!t) return;
+  const ok=t.checked;
+  [$(id+'-c-'+k),$(id+'-n-'+k)].forEach(el=>{ if(!el) return; el.disabled=ok; if(ok) el.value=''; });
+}
+/* Sections that are neither ticked nor explained. Everything else is optional. */
+function unresolved(id){
+  return VSEC.filter(([k])=>{
+    const t=$(id+'-t-'+k);
+    if(t&&t.checked) return false;
+    const c=(($(id+'-c-'+k)||{}).value||'').trim(), n=(($(id+'-n-'+k)||{}).value||'').trim();
+    return !c && !n;
+  }).map(([,t])=>t);
 }
 
 function collect(id){
@@ -482,15 +501,22 @@ async function callStage(btn,msg,fn,args){
 }
 
 function wireVerify(){
-  if($('p-save')) $('p-save').onclick=()=>
-    callStage('p-save','p-msg','ddr_prepare',{p_date:REP.report_date,p_remarks:$('p-rem').value});
+  /* Both stages send the ticks AND the notes. The old code read the wrong element
+     ids (c-production instead of c0-t-production), so every section arrived unticked
+     and the notes were never sent - which is why a correct report could not be saved. */
+  if($('p-save')) $('p-save').onclick=()=>{
+    const g=collect('p'), bad=unresolved('p');
+    if(bad.length){ $('p-msg').textContent='Tick OK, or give a correct figure or a remark, for: '+bad.join(', '); return; }
+    callStage('p-save','p-msg','ddr_prepare',
+      {p_date:REP.report_date,p_sections:g.sections,p_notes:g.notes,p_remarks:$('p-rem').value});
+  };
 
   if($('c-save')) $('c-save').onclick=()=>{
-    const sec={}; VSEC.forEach(([k])=>{sec[k]=!!($('c-'+k)&&$('c-'+k).checked);});
-    if(!VSEC.every(([k])=>sec[k]) && !$('c-rem').value.trim()){
-      $('c-msg').textContent='Please say what is wrong before leaving a section unticked.';return;
-    }
-    callStage('c-save','c-msg','ddr_check',{p_date:REP.report_date,p_sections:sec,p_remarks:$('c-rem').value});
+    const gid='c'+($('c-save').getAttribute('data-i')||'0');
+    const g=collect(gid), bad=unresolved(gid);
+    if(bad.length){ $('c-msg').textContent='Tick OK, or give a correct figure or a remark, for: '+bad.join(', '); return; }
+    callStage('c-save','c-msg','ddr_check',
+      {p_date:REP.report_date,p_sections:g.sections,p_notes:g.notes,p_remarks:$('c-rem').value});
   };
 
   if($('a-save')) $('a-save').onclick=()=>{
