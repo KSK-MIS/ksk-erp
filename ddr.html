@@ -99,13 +99,29 @@
   .vstep .vb{flex:1;min-width:0}
   .vstep .vt{font-size:13px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.5px}
   .vstep .vby{font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-3);font-size:12.5px;margin-left:8px}
-  .vrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px;padding:7px 10px;border:1px solid var(--line-2);border-radius:3px;background:#fafbfc}
+  .vrow{margin-top:9px;border:1px solid var(--line-2);border-radius:3px;background:#fafbfc;overflow:hidden}
   .vrow.mine{background:#fff;border-color:var(--navy);box-shadow:inset 3px 0 0 var(--gold)}
-  .vrow .vnm{font-size:13px;font-weight:600;min-width:132px}
+  .vrow .vnh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 10px;border-bottom:1px solid var(--line-2)}
+  .vrow .vnm{font-size:13px;font-weight:600}
   .vrow .vst{margin-left:auto;font-size:12px;color:var(--ink-3);white-space:nowrap}
-  .vfy label.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;cursor:pointer;color:var(--ink-2)}
-  .vfy label.chk input{width:14px;height:14px;accent-color:var(--navy);cursor:pointer}
-  .vfy label.chk input:disabled{cursor:default;opacity:.55}
+  table.vgrid{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff}
+  table.vgrid th{background:var(--head);font-size:11px;text-transform:uppercase;letter-spacing:.3px;
+    color:var(--ink-3);font-weight:600;text-align:left;padding:5px 9px;border-bottom:1px solid var(--line-2)}
+  table.vgrid td{padding:4px 9px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+  table.vgrid tr:last-child td{border-bottom:0}
+  table.vgrid tr.q td{background:var(--warn-bg)}
+  table.vgrid tr.q td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+  table.vgrid input[type=checkbox]{width:15px;height:15px;accent-color:var(--ok);cursor:pointer}
+  table.vgrid input[type=checkbox]:disabled{cursor:default;opacity:.55}
+  input.vin{width:100%;min-width:90px;padding:4px 6px;border:1px solid var(--line);border-radius:3px;
+    font-family:inherit;font-size:12.5px;background:#fff;color:var(--ink)}
+  input.vin:focus{outline:2px solid #aecbf5;outline-offset:-1px}
+  .vq{margin:0 14px 12px;border:1px solid #f0b3ab;border-left:4px solid var(--bad);border-radius:3px;background:var(--bad-bg);padding:10px 12px}
+  .vq b.h{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin-bottom:6px}
+  .vq .qi{font-size:13px;padding:4px 0;border-top:1px solid #f0b3ab;line-height:1.5}
+  .vq .qi:first-of-type{border-top:0}
+  .vq .qi .was{color:var(--ink-3);text-decoration:line-through}
+  .vq .qi .now{font-weight:700;color:var(--bad)}
   .vfy textarea{width:100%;margin-top:8px;padding:7px 9px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:13px;resize:vertical;min-height:46px;background:#fff;color:var(--ink)}
   .vfy .vact{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
   .vfy .vmsg{font-size:12.5px;color:var(--ink-2)}
@@ -335,6 +351,7 @@ const STG={
   draft:           {t:'Not submitted',        c:'no',   b:'red'},
   prepared:        {t:'Awaiting checking',    c:'part', b:'amber'},
   checking:        {t:'Partly checked',       c:'part', b:'amber'},
+  queried:         {t:'Figures queried',      c:'no',   b:'red'},
   checked:         {t:'Checked — awaiting sign-off', c:'part', b:'amber'},
   signed:          {t:'Signed off',           c:'ok',   b:'green'},
   signed_override: {t:'Signed off — override',c:'part', b:'amber'}
@@ -343,42 +360,91 @@ const dts=t=>t?new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',h
 const so=(stage,email)=>(REP.signoffs||[]).find(s=>s.stage===stage&&(!email||s.actor_email===email));
 const allTicked=s=>!!s&&VSEC.every(([k])=>(s.sections||{})[k]===true);
 
+/* What the report itself says for a section, so a stated correction can be read
+   against the figure it disputes. */
+function reported(k){
+  const d=REP.data||{}, s=d.summary||{};
+  if(k==='stock')   return money(s.stock);
+  if(k==='debtors') return money(s.debtors_net);
+  if(k==='advance') return money(s.advance_net);
+  if(k==='production'){
+    const r=((d.production||{}).rows||[]).find(x=>x.label==='Actual Production');
+    return (r&&r.total!=null)?n2(r.total)+' MT':'—';
+  }
+  return '—';
+}
+
+/* One four-row grid per person: tick, the figure they say is right, and why. */
+function grid(row,editable,id){
+  const body=VSEC.map(([k,t])=>{
+    const ok=((row&&row.sections)||{})[k]===true;
+    const nt=((row&&row.notes)||{})[k]||{};
+    return `<tr class="${ok?'':(nt.correct||nt.note?'q':'')}">
+      <td class="rowlbl">${t}</td>
+      <td class="num dim">${reported(k)}</td>
+      <td><input type="checkbox" ${editable?`id="${id}-t-${k}"`:''} ${ok?'checked':''} ${editable?'':'disabled'}></td>
+      <td>${editable?`<input class="vin" id="${id}-c-${k}" value="${esc(nt.correct||'')}" placeholder="correct figure">`
+                    :(nt.correct?`<b>${esc(nt.correct)}</b>`:'')}</td>
+      <td>${editable?`<input class="vin" id="${id}-n-${k}" value="${esc(nt.note||'')}" placeholder="what is wrong">`
+                    :esc(nt.note||'')}</td></tr>`;
+  }).join('');
+  return `<table class="vgrid"><thead><tr>
+      <th style="width:24%">Section</th><th style="width:16%">Reported</th><th style="width:6%">OK</th>
+      <th style="width:22%">Correct figure</th><th>Remark</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function collect(id){
+  const sections={}, notes={};
+  VSEC.forEach(([k])=>{
+    sections[k]=!!($(id+'-t-'+k)&&$(id+'-t-'+k).checked);
+    const c=(($(id+'-c-'+k)||{}).value||'').trim(), n=(($(id+'-n-'+k)||{}).value||'').trim();
+    if(c||n) notes[k]={correct:c,note:n};
+  });
+  return {sections,notes};
+}
+
 function verifyBlock(){
   if(!REP) return '';
   const st=STG[REP.stage]||STG.draft;
   const me=(REP.my_email||'').toLowerCase(), role=REP.my_ddr_role;
   const prep=so('prepare'), appr=so('approve'), checkers=REP.checkers||[];
 
-  // --- step 1: prepared ---
+  // --- step 1: prepared — the maker ticks the same four sections ---
   const s1mine=(role==='maker'||role==='approver');
   const s1=`<li class="vstep ${prep?'done':'now'}">
     <span class="vnum">${prep?'&#10003;':'1'}</span>
     <div class="vb">
       <div class="vt">Prepared<span class="vby">${prep?esc(prep.actor_name)+' &middot; '+dts(prep.at):'not yet submitted for checking'}</span></div>
-      ${prep&&prep.remarks?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
-      ${s1mine?`<textarea id="p-rem" placeholder="Note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
+      <div class="vrow ${s1mine?'mine':''}">
+        <div class="vnh"><span class="vnm">${prep?esc(prep.actor_name):'Preparer'}${s1mine?' (you)':''}</span>
+          <span class="vst">${prep?dts(prep.at):'not yet submitted'}</span>
+          ${prep?(allTicked(prep)?'<span class="badge green">All four tie</span>':'<span class="badge red">Query raised</span>'):''}</div>
+        ${grid(prep,s1mine,'p')}
+      </div>
+      ${prep&&prep.remarks&&!s1mine?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
+      ${s1mine?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
         <div class="vact"><button class="cmd primary" id="p-save">${prep?'Update submission':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
     </div></li>`;
 
-  // --- step 2: checked, one row per checker ---
-  const rows=checkers.map(c=>{
+  // --- step 2: checked, one grid per checker ---
+  const s2done=['checked','signed','signed_override'].indexOf(REP.stage)>=0;
+  const rows=checkers.map((c,i)=>{
     const row=so('check',c.email), mine=(c.email===me&&role==='checker'), ok=allTicked(row);
-    const boxes=VSEC.map(([k,t])=>
-      `<label class="chk"><input type="checkbox" ${mine?`id="c-${k}"`:''} ${((row&&row.sections)||{})[k]?'checked':''} ${mine?'':'disabled'}><span>${t}</span></label>`).join('');
     const state=ok?'<span class="badge green">Checked</span>'
-              :row?'<span class="badge amber">Queried</span>'
+              :row?'<span class="badge red">Query raised</span>'
                   :'<span class="vst">not yet checked</span>';
     return `<div class="vrow ${mine?'mine':''}">
-        <span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>${boxes}
-        <span class="vst">${row?dts(row.at):''}</span>${state}
+        <div class="vnh"><span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>
+          <span class="vst">${row?dts(row.at):''}</span>${state}</div>
+        ${grid(row,mine,'c'+i)}
       </div>
-      ${row&&row.remarks?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
-      ${mine?`<textarea id="c-rem" placeholder="Remark — say what does not tie to source, and to what">${esc(row&&row.remarks||'')}</textarea>
-        <div class="vact"><button class="cmd primary" id="c-save">Save my check</button><span class="vmsg" id="c-msg"></span>
-        ${prep?'':'<span class="vmsg">Waiting on the preparer to submit.</span>'}</div>`:''}`;
+      ${row&&row.remarks&&!mine?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
+      ${mine?`<textarea id="c-rem" placeholder="Overall remark (optional)">${esc(row&&row.remarks||'')}</textarea>
+        <div class="vact"><button class="cmd primary" id="c-save" data-i="${i}" ${prep?'':'disabled'}>Save my check</button>
+        <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`:''}`;
   }).join('');
-  const s2 = `<li class="vstep ${REP.stage==='checked'||REP.stage==='signed'||REP.stage==='signed_override'?'done':(prep?'now':'')}">
-    <span class="vnum">${REP.stage==='checked'||REP.stage==='signed'||REP.stage==='signed_override'?'&#10003;':'2'}</span>
+  const s2 = `<li class="vstep ${s2done?'done':(prep?'now':'')}">
+    <span class="vnum">${s2done?'&#10003;':'2'}</span>
     <div class="vb"><div class="vt">Checked<span class="vby">both checkers must clear all four sections</span></div>
     ${rows||'<div class="vst">No checkers are configured.</div>'}</div></li>`;
 
@@ -515,15 +581,6 @@ async function loadDates(sel){
   $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${MARK[r.stage]||'○'} ${dl(r.report_date)}</option>`).join('');
 }
 
-/* Who may open the Daily Report. Must mirror app.module_level('ddr') in Postgres:
-   gating on job title alone locked the named checkers out of report history. */
-function canViewDDR(me){
-  if(!me) return false;
-  if(me.is_super_admin||me.role==='DIRECTOR'||me.role==='ADMIN') return true;
-  var lvl=((me.permissions||{}).access||{}).ddr;
-  return lvl==='view'||lvl==='edit';
-}
-
 async function route(session){
   if(!session){show('screen-login');return;}
   const{data,error}=await sb.rpc('my_profile');
@@ -532,8 +589,8 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  if(!canViewDDR(ME)){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures. Ask the Director if you need access.</div></div></div>';
+  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
     $('datesel').style.display='none';return;
   }
   await loadDates();
