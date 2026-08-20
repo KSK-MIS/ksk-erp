@@ -212,11 +212,25 @@ body.ksk-on .ksk-sb{ display:flex; }
 <section id="screen-login">
   <div class="card">
     <h3>Sign in</h3>
-    <p class="muted">Use your company Google account. If Google sign-in is unavailable, request an email link below.</p>
-    <button class="btn" id="btn-google" style="margin-top:14px">Sign in with Google</button>
-    <label for="email">Email address (fallback)</label>
-    <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email">
-    <button class="btn ghost" id="btn-login">Send sign-in link</button>
+    <p class="muted">Enter your company email and we will send you a 6-digit code.</p>
+
+    <div id="step-email">
+      <label for="email">Email address</label>
+      <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email" inputmode="email">
+      <button class="btn" id="btn-login" style="margin-top:10px">Email me a 6-digit code</button>
+      <button class="btn ghost" id="btn-google" style="margin-top:10px">Sign in with Google</button>
+    </div>
+
+    <div id="step-code" style="display:none">
+      <label for="otp">6-digit code sent to <b id="otp-to"></b></label>
+      <input id="otp" type="text" placeholder="123456" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="6" pattern="[0-9]*" style="letter-spacing:.4em;font-size:22px;text-align:center">
+      <button class="btn" id="btn-verify" style="margin-top:10px">Sign in</button>
+      <button class="btn ghost" id="btn-resend" style="margin-top:10px">Send a new code</button>
+      <button class="btn ghost" id="btn-back" style="margin-top:10px">Use a different email</button>
+      <p class="muted" style="margin-top:10px">The code expires in about an hour. If you asked for more than one, only the newest works.</p>
+    </div>
+
     <div class="msg" id="login-msg"></div>
   </div>
 </section>
@@ -317,12 +331,47 @@ $('btn-google').onclick=async()=>{
   const{error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
   if(error) msg('login-msg',error.message,'err');
 };
+// Email 6-digit code. The Supabase template leads with {{ .Token }}, so the
+// page must verify a token — a link-only flow leaves users with a code and
+// nowhere to type it (which is exactly what happened on 20 Aug 2026).
+let OTP_EMAIL='';
+async function sendCode(email){
+  // shouldCreateUser:true so a new staffer can onboard themselves; anyone not
+  // listed in adm.users still lands on screen-denied after signing in.
+  const{error}=await sb.auth.signInWithOtp({email,options:{shouldCreateUser:true}});
+  if(error){msg('login-msg',error.message,'err');return false;}
+  OTP_EMAIL=email;
+  $('otp-to').textContent=email;
+  $('step-email').style.display='none';
+  $('step-code').style.display='block';
+  $('otp').value='';
+  $('otp').focus();
+  msg('login-msg','Code sent. Check your inbox, and your spam folder.','ok');
+  return true;
+}
 $('btn-login').onclick=async()=>{
   const email=$('email').value.trim().toLowerCase();
   if(!email){msg('login-msg','Please enter your email address.','err');return;}
-  const{error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
-  error?msg('login-msg',error.message,'err'):msg('login-msg','Link sent. Open it on this device, in this browser.','ok');
+  await sendCode(email);
 };
+$('btn-resend').onclick=async()=>{ if(OTP_EMAIL) await sendCode(OTP_EMAIL); };
+$('btn-back').onclick=()=>{
+  $('step-code').style.display='none';
+  $('step-email').style.display='block';
+  msg('login-msg','','');
+};
+$('btn-verify').onclick=async()=>{
+  const token=$('otp').value.trim().replace(/\D/g,'');
+  if(token.length!==6){msg('login-msg','Enter the 6-digit code from the email.','err');return;}
+  msg('login-msg','Checking…','');
+  const{error}=await sb.auth.verifyOtp({email:OTP_EMAIL,token,type:'email'});
+  if(error){msg('login-msg',error.message+' — if this code is old, request a new one.','err');return;}
+  location.reload();
+};
+// Enter key submits, and pasting the code from the email auto-submits.
+$('otp').addEventListener('keydown',e=>{if(e.key==='Enter')$('btn-verify').click();});
+$('otp').addEventListener('input',()=>{if($('otp').value.replace(/\D/g,'').length===6)$('btn-verify').click();});
+$('email').addEventListener('keydown',e=>{if(e.key==='Enter')$('btn-login').click();});
 async function signOut(){await sb.auth.signOut();location.reload();}
 function show(id){['screen-login','screen-denied','screen-app'].forEach(s=>$(s).style.display=s===id?'block':'none');document.body.classList.toggle('ksk-on',id==='screen-app');}
 
