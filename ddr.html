@@ -431,6 +431,7 @@ function verifyBlock(){
 
   // --- step 1: prepared — the maker ticks the same four sections ---
   const s1mine=(role==='maker'||role==='approver');
+  const s1edit=s1mine&&!prep;   // final once submitted
   const s1=`<li class="vstep ${prep?'done':'now'}">
     <span class="vnum">${prep?'&#10003;':'1'}</span>
     <div class="vb">
@@ -439,29 +440,32 @@ function verifyBlock(){
         <div class="vnh"><span class="vnm">${prep?esc(prep.actor_name):'Preparer'}${s1mine?' (you)':''}</span>
           <span class="vst">${prep?dts(prep.at):'not yet submitted'}</span>
           ${prep?(allTicked(prep)?'<span class="badge green">All four tie</span>':'<span class="badge red">Query raised</span>'):''}</div>
-        ${grid(prep,s1mine,'p')}
+        ${grid(prep,s1edit,'p')}
       </div>
       ${prep&&prep.remarks&&!s1mine?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
-      ${s1mine?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
-        <div class="vact"><button class="cmd primary" id="p-save">${prep?'Update submission':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
+      ${s1edit?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)"></textarea>
+        <div class="vact"><button class="cmd primary" id="p-save">Submit for checking</button><span class="vmsg" id="p-msg"></span></div>`
+        :(s1mine&&prep?`<div class="vrem">Submitted &mdash; this cannot be revised. Ask the Director to reopen the day if it must change.</div>`:'')}
     </div></li>`;
 
   // --- step 2: checked, one grid per checker ---
   const s2done=['checked','signed','signed_override'].indexOf(REP.stage)>=0;
   const rows=checkers.map((c,i)=>{
     const row=so('check',c.email), mine=(c.email===me&&role==='checker'), ok=allTicked(row);
+    const cedit=mine&&!row;   // final once checked
     const state=ok?'<span class="badge green">Checked</span>'
               :row?'<span class="badge red">Query raised</span>'
                   :'<span class="vst">not yet checked</span>';
     return `<div class="vrow ${mine?'mine':''}">
         <div class="vnh"><span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>
           <span class="vst">${row?dts(row.at):''}</span>${state}</div>
-        ${grid(row,mine,'c'+i)}
+        ${grid(row,cedit,'c'+i)}
       </div>
       ${row&&row.remarks&&!mine?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
-      ${mine?`<textarea id="c-rem" placeholder="Overall remark (optional)">${esc(row&&row.remarks||'')}</textarea>
+      ${cedit?`<textarea id="c-rem" placeholder="Overall remark (optional)"></textarea>
         <div class="vact"><button class="cmd primary" id="c-save" data-i="${i}" ${prep?'':'disabled'}>Save my check</button>
-        <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`:''}`;
+        <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`
+        :(mine&&row?`<div class="vrem">Your check is recorded &mdash; it cannot be revised. Ask the Director to reopen the day if it must change.</div>`:'')}`;
   }).join('');
   const s2 = `<li class="vstep ${s2done?'done':(prep?'now':'')}">
     <span class="vnum">${s2done?'&#10003;':'2'}</span>
@@ -479,7 +483,7 @@ function verifyBlock(){
       ${appr&&appr.is_override?`<div class="vrem alert"><b>Signed without a complete check.</b> This was recorded as an override in the log.</div>`:''}
       ${s3mine?`<textarea id="a-rem" placeholder="Remark on sign-off (optional)">${esc(appr&&appr.remarks||'')}</textarea>
         <div class="vact">
-          <button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>
+          ${appr?'':`<button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>`}
           ${(REP.signoffs||[]).length?'<button class="cmd" id="a-reopen">Reopen</button>':''}
           <span class="vmsg" id="a-msg"></span></div>`:''}
     </div></li>`;
