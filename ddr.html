@@ -604,10 +604,19 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
+  /* Who may open the report is decided by the module access grid — app.can_view('ddr')
+     in Postgres — not by the adm.users role. Checkers are STAFF, and a role test would
+     shut them out of the very report they are named to check. Mirror the database rule
+     here so the page agrees with what the RPCs will actually return. */
+  const acc=(ME.permissions&&ME.permissions.access)||{};
+  const ddrAcc=acc.ddr||'none';
+  if(!(ME.is_super_admin||ME.role==='DIRECTOR'||ddrAcc!=='none')){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is open only to those given access to it.</div></div></div>';
     $('datesel').style.display='none';return;
   }
+  /* Everyone who may open the report may also choose the day. Checkers in particular
+     need it: they are often asked to clear a day other than the one that loads first. */
+  $('datesel').style.display='';
   await loadDates();
   await load($('datesel').value||undefined);
 }
