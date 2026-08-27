@@ -418,6 +418,19 @@ function collect(id){
   return {sections,notes};
 }
 
+/* Mirror ddr.validate_sections() exactly: a section left unticked needs BOTH the
+   figure the person says is right and a word on what is wrong. The overall remark
+   box is not a substitute for either — asking for it instead was what left a
+   properly filled-in check unsavable. */
+function shortfall(sections,notes){
+  return VSEC.filter(([k])=>{
+    if(sections[k]) return false;
+    const nt=notes[k]||{};
+    return !(nt.correct&&nt.note);
+  }).map(([,t])=>t);
+}
+const needMsg=bad=>'Tick OK, or give both the correct figure and a remark, for: '+bad.join(', ')+'.';
+
 function verifyBlock(){
   if(!REP) return '';
   const st=STG[REP.stage]||STG.draft;
@@ -497,15 +510,23 @@ async function callStage(btn,msg,fn,args){
 }
 
 function wireVerify(){
-  if($('p-save')) $('p-save').onclick=()=>
-    callStage('p-save','p-msg','ddr_prepare',{p_date:REP.report_date,p_remarks:$('p-rem').value});
+  /* Both grids are read through collect(), using the same id scheme grid() writes:
+     '<gridId>-t|-c|-n-<section>'. The preparer's grid is 'p'; each checker's is
+     'c'+their index in REP.checkers, which is why the button carries data-i. */
+  if($('p-save')) $('p-save').onclick=()=>{
+    const {sections,notes}=collect('p');
+    const bad=shortfall(sections,notes);
+    if(bad.length){$('p-msg').textContent=needMsg(bad);return;}
+    callStage('p-save','p-msg','ddr_prepare',
+      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:$('p-rem').value});
+  };
 
   if($('c-save')) $('c-save').onclick=()=>{
-    const sec={}; VSEC.forEach(([k])=>{sec[k]=!!($('c-'+k)&&$('c-'+k).checked);});
-    if(!VSEC.every(([k])=>sec[k]) && !$('c-rem').value.trim()){
-      $('c-msg').textContent='Please say what is wrong before leaving a section unticked.';return;
-    }
-    callStage('c-save','c-msg','ddr_check',{p_date:REP.report_date,p_sections:sec,p_remarks:$('c-rem').value});
+    const {sections,notes}=collect('c'+$('c-save').getAttribute('data-i'));
+    const bad=shortfall(sections,notes);
+    if(bad.length){$('c-msg').textContent=needMsg(bad);return;}
+    callStage('c-save','c-msg','ddr_check',
+      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:$('c-rem').value});
   };
 
   if($('a-save')) $('a-save').onclick=()=>{
