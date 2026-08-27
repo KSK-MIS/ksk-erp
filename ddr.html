@@ -75,8 +75,20 @@
   td.dim{color:var(--ink-3)}
   tr.total td{background:var(--head)!important;font-weight:700;border-top:2px solid var(--navy)}
   .rowlbl{font-weight:600;color:var(--ink)}
-  .stick{position:sticky;left:0;background:inherit;z-index:1}
-  thead th.stick{background:var(--head);z-index:2}
+  /* ----- frozen first column -----
+     NB: never use background:inherit here. Background is not an inherited
+     property, so odd rows (which carry no tr background) resolved to
+     transparent and the scrolling cells showed straight through the
+     frozen Particulars column. Each state needs its own opaque colour. */
+  .stick{position:sticky;left:0;z-index:3;background:#fff;
+         border-right:1px solid var(--line);box-shadow:2px 0 4px -2px rgba(18,57,95,.18)}
+  tbody tr:nth-child(even) td.stick{background:#fafbfc}
+  tbody tr:hover td.stick{background:#eef4fb}
+  tbody tr.total td.stick{background:var(--head)}
+  thead th.stick{background:var(--head);z-index:5}
+  /* Source column: cap the width so one long note cannot stretch the
+     table sideways; full text stays available on hover. */
+  td.src>span{display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .badge{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:3px;white-space:nowrap;border:1px solid}
   .badge.red{background:var(--bad-bg);color:var(--bad);border-color:#f0b3ab}
   .badge.amber{background:var(--warn-bg);color:var(--warn);border-color:#e8c98a}
@@ -148,6 +160,9 @@
     .panel,.kpi{break-inside:avoid;box-shadow:none}
     h2.sec{break-after:avoid}
     .matrix{overflow:visible}
+    /* nothing scrolls on paper - unfreeze the column and let Source wrap */
+    .stick{position:static;box-shadow:none}
+    td.src>span{max-width:none;overflow:visible;white-space:normal}
     .vfy textarea,.vfy .vact{display:none!important}
     .vfy{break-inside:avoid;background:#fff!important}
     @page{margin:12mm;size:A4 landscape}
@@ -307,7 +322,7 @@ function matrix(title,note,sec,opts){
     const tot=fmtVal(f,r.total);
     let tds=`<td class="stick rowlbl">${esc(r.label)}</td>`;
     if(opts.uom) tds+=`<td class="dim">${esc(r.uom||'')}</td>`;
-    tds+=`<td class="dim">${esc(r.source||'')}</td>`;
+    tds+=`<td class="dim src" title="${esc(r.source||'')}"><span>${esc(r.source||'')}</span></td>`;
     tds+=`<td class="num ${tot.neg?'neg':''}">${tot.t}</td>`;
     tds+=cols.map(c=>{const cell=fmtVal(f,(r.vals||{})[c]);return `<td class="num ${cell.neg?'neg':''}">${cell.t}</td>`;}).join('');
     return `<tr class="${isTot?'total':''}">${tds}</tr>`;
@@ -382,35 +397,15 @@ function grid(row,editable,id){
     return `<tr class="${ok?'':(nt.correct||nt.note?'q':'')}">
       <td class="rowlbl">${t}</td>
       <td class="num dim">${reported(k)}</td>
-      <td><input type="checkbox" ${editable?`id="${id}-t-${k}" onchange="secSync('${id}','${k}')"`:''} ${ok?'checked':''} ${editable?'':'disabled'}></td>
-      <td>${editable?`<input class="vin" id="${id}-c-${k}" value="${esc(nt.correct||'')}" placeholder="correct figure (required if not OK)" ${ok?'disabled':''}>`
+      <td><input type="checkbox" ${editable?`id="${id}-t-${k}"`:''} ${ok?'checked':''} ${editable?'':'disabled'}></td>
+      <td>${editable?`<input class="vin" id="${id}-c-${k}" value="${esc(nt.correct||'')}" placeholder="correct figure">`
                     :(nt.correct?`<b>${esc(nt.correct)}</b>`:'')}</td>
-      <td>${editable?`<input class="vin" id="${id}-n-${k}" value="${esc(nt.note||'')}" placeholder="remark (required if not OK)" ${ok?'disabled':''}>`
+      <td>${editable?`<input class="vin" id="${id}-n-${k}" value="${esc(nt.note||'')}" placeholder="what is wrong">`
                     :esc(nt.note||'')}</td></tr>`;
   }).join('');
   return `<table class="vgrid"><thead><tr>
       <th style="width:24%">Section</th><th style="width:16%">Reported</th><th style="width:6%">OK</th>
       <th style="width:22%">Correct figure</th><th>Remark</th></tr></thead><tbody>${body}</tbody></table>`;
-}
-
-/* Ticking OK means the figure is right, so the correct-figure and remark boxes
-   are irrelevant: clear and lock them. Unticking re-opens them, because they are
-   then the only way to say what is wrong. */
-function secSync(id,k){
-  const t=$(id+'-t-'+k);
-  if(!t) return;
-  const ok=t.checked;
-  [$(id+'-c-'+k),$(id+'-n-'+k)].forEach(el=>{ if(!el) return; el.disabled=ok; if(ok) el.value=''; });
-}
-/* A section that is not ticked OK must carry BOTH the correct figure and a remark.
-   Mirrors ddr.validate_sections in Postgres - keep the two in step. */
-function unresolved(id){
-  return VSEC.filter(([k])=>{
-    const t=$(id+'-t-'+k);
-    if(t&&t.checked) return false;
-    const c=(($(id+'-c-'+k)||{}).value||'').trim(), n=(($(id+'-n-'+k)||{}).value||'').trim();
-    return !c || !n;
-  }).map(([,t])=>t);
 }
 
 function collect(id){
@@ -431,7 +426,6 @@ function verifyBlock(){
 
   // --- step 1: prepared — the maker ticks the same four sections ---
   const s1mine=(role==='maker'||role==='approver');
-  const s1edit=s1mine&&!prep;   // final once submitted
   const s1=`<li class="vstep ${prep?'done':'now'}">
     <span class="vnum">${prep?'&#10003;':'1'}</span>
     <div class="vb">
@@ -440,32 +434,29 @@ function verifyBlock(){
         <div class="vnh"><span class="vnm">${prep?esc(prep.actor_name):'Preparer'}${s1mine?' (you)':''}</span>
           <span class="vst">${prep?dts(prep.at):'not yet submitted'}</span>
           ${prep?(allTicked(prep)?'<span class="badge green">All four tie</span>':'<span class="badge red">Query raised</span>'):''}</div>
-        ${grid(prep,s1edit,'p')}
+        ${grid(prep,s1mine,'p')}
       </div>
       ${prep&&prep.remarks&&!s1mine?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
-      ${s1edit?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)"></textarea>
-        <div class="vact"><button class="cmd primary" id="p-save">Submit for checking</button><span class="vmsg" id="p-msg"></span></div>`
-        :(s1mine&&prep?`<div class="vrem">Submitted &mdash; this cannot be revised. Ask the Director to reopen the day if it must change.</div>`:'')}
+      ${s1mine?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
+        <div class="vact"><button class="cmd primary" id="p-save">${prep?'Update submission':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
     </div></li>`;
 
   // --- step 2: checked, one grid per checker ---
   const s2done=['checked','signed','signed_override'].indexOf(REP.stage)>=0;
   const rows=checkers.map((c,i)=>{
     const row=so('check',c.email), mine=(c.email===me&&role==='checker'), ok=allTicked(row);
-    const cedit=mine&&!row;   // final once checked
     const state=ok?'<span class="badge green">Checked</span>'
               :row?'<span class="badge red">Query raised</span>'
                   :'<span class="vst">not yet checked</span>';
     return `<div class="vrow ${mine?'mine':''}">
         <div class="vnh"><span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>
           <span class="vst">${row?dts(row.at):''}</span>${state}</div>
-        ${grid(row,cedit,'c'+i)}
+        ${grid(row,mine,'c'+i)}
       </div>
       ${row&&row.remarks&&!mine?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
-      ${cedit?`<textarea id="c-rem" placeholder="Overall remark (optional)"></textarea>
+      ${mine?`<textarea id="c-rem" placeholder="Overall remark (optional)">${esc(row&&row.remarks||'')}</textarea>
         <div class="vact"><button class="cmd primary" id="c-save" data-i="${i}" ${prep?'':'disabled'}>Save my check</button>
-        <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`
-        :(mine&&row?`<div class="vrem">Your check is recorded &mdash; it cannot be revised. Ask the Director to reopen the day if it must change.</div>`:'')}`;
+        <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`:''}`;
   }).join('');
   const s2 = `<li class="vstep ${s2done?'done':(prep?'now':'')}">
     <span class="vnum">${s2done?'&#10003;':'2'}</span>
@@ -483,7 +474,7 @@ function verifyBlock(){
       ${appr&&appr.is_override?`<div class="vrem alert"><b>Signed without a complete check.</b> This was recorded as an override in the log.</div>`:''}
       ${s3mine?`<textarea id="a-rem" placeholder="Remark on sign-off (optional)">${esc(appr&&appr.remarks||'')}</textarea>
         <div class="vact">
-          ${appr?'':`<button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>`}
+          <button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>
           ${(REP.signoffs||[]).length?'<button class="cmd" id="a-reopen">Reopen</button>':''}
           <span class="vmsg" id="a-msg"></span></div>`:''}
     </div></li>`;
@@ -506,22 +497,15 @@ async function callStage(btn,msg,fn,args){
 }
 
 function wireVerify(){
-  /* Both stages send the ticks AND the notes. The old code read the wrong element
-     ids (c-production instead of c0-t-production), so every section arrived unticked
-     and the notes were never sent - which is why a correct report could not be saved. */
-  if($('p-save')) $('p-save').onclick=()=>{
-    const g=collect('p'), bad=unresolved('p');
-    if(bad.length){ $('p-msg').textContent='Tick OK, or give BOTH the correct figure and a remark, for: '+bad.join(', '); return; }
-    callStage('p-save','p-msg','ddr_prepare',
-      {p_date:REP.report_date,p_sections:g.sections,p_notes:g.notes,p_remarks:$('p-rem').value});
-  };
+  if($('p-save')) $('p-save').onclick=()=>
+    callStage('p-save','p-msg','ddr_prepare',{p_date:REP.report_date,p_remarks:$('p-rem').value});
 
   if($('c-save')) $('c-save').onclick=()=>{
-    const gid='c'+($('c-save').getAttribute('data-i')||'0');
-    const g=collect(gid), bad=unresolved(gid);
-    if(bad.length){ $('c-msg').textContent='Tick OK, or give BOTH the correct figure and a remark, for: '+bad.join(', '); return; }
-    callStage('c-save','c-msg','ddr_check',
-      {p_date:REP.report_date,p_sections:g.sections,p_notes:g.notes,p_remarks:$('c-rem').value});
+    const sec={}; VSEC.forEach(([k])=>{sec[k]=!!($('c-'+k)&&$('c-'+k).checked);});
+    if(!VSEC.every(([k])=>sec[k]) && !$('c-rem').value.trim()){
+      $('c-msg').textContent='Please say what is wrong before leaving a section unticked.';return;
+    }
+    callStage('c-save','c-msg','ddr_check',{p_date:REP.report_date,p_sections:sec,p_remarks:$('c-rem').value});
   };
 
   if($('a-save')) $('a-save').onclick=()=>{
@@ -612,15 +596,6 @@ async function loadDates(sel){
   $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${MARK[r.stage]||'○'} ${dl(r.report_date)}</option>`).join('');
 }
 
-/* Who may open the Daily Report. Must mirror app.module_level('ddr') in Postgres.
-   Gating on job title alone locked the named checkers (STAFF) out of report history. */
-function canViewDDR(me){
-  if(!me) return false;
-  if(me.is_super_admin||me.role==='DIRECTOR'||me.role==='ADMIN') return true;
-  var lvl=((me.permissions||{}).access||{}).ddr;
-  return lvl==='view'||lvl==='edit';
-}
-
 async function route(session){
   if(!session){show('screen-login');return;}
   const{data,error}=await sb.rpc('my_profile');
@@ -629,8 +604,8 @@ async function route(session){
   $('usr').innerHTML='<b>'+esc(ME.full_name)+'</b><span>'+esc(ME.role.charAt(0)+ME.role.slice(1).toLowerCase())+'</span>';
   $('foot-role').textContent='Signed in as '+ME.full_name+' ('+ME.role.toLowerCase()+')';
   show('screen-app');
-  if(!canViewDDR(ME)){
-    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures. Ask the Director if you need access.</div></div></div>';
+  if(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN'){
+    $('body').innerHTML='<div class="panel"><div style="padding:20px"><b>Not available for your role.</b><div class="muted">The Director Daily Report carries financial figures and is visible to Directors and Admins only.</div></div></div>';
     $('datesel').style.display='none';return;
   }
   await loadDates();
