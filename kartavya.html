@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- ============================================================
-     KSK ERP 1.0 — Module 1: KARTAVYA (Accountability)
+     KSK ERP 1.0 — Module 1: TASK LIST (Accountability)
      Restructured to a TaskPro-style responsive sidebar dashboard.
      Screens: Task Overview · Pending Tasks · My Tasks · Overall
      Progress · Dashboard · Checklists · Capture · (Assign Task).
@@ -11,7 +11,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kartavya · KSK ERP</title>
+<title>Task List · KSK ERP</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
@@ -23,7 +23,7 @@
   /* sidebar */
   .sidebar{position:fixed;top:0;left:0;bottom:0;width:250px;background:linear-gradient(180deg,var(--sb),var(--sb2));color:#dce7f2;display:flex;flex-direction:column;z-index:40;transition:transform .25s;}
   .brand{padding:20px 20px 8px;}
-  .brand .logo{font-size:23px;font-weight:800;color:#fff;}
+  .brand .logo{font-size:20px;font-weight:800;color:#fff;line-height:1.15;}
   .brand .logo span{color:var(--mint);}
   .brand .sub{font-size:9.5px;letter-spacing:1.5px;color:#9ab0c6;margin-top:3px;text-transform:uppercase;}
   .navsec{padding:6px 14px;overflow-y:auto;}
@@ -130,6 +130,8 @@ const isAdmin=()=>ME&&(ME.role==='DIRECTOR'||ME.role==='ADMIN');
 function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
 async function rpc(fn,args){ const {data,error}=await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
 async function q(view,mod){ let x=sb.from(view).select('*'); if(mod)x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
+function firstName(n){ return (n||'').trim().split(/\s+/)[0] || 'My'; }
+function possessive(n){ const f=firstName(n); return /s$/i.test(f) ? f+"'" : f+"'s"; }
 function initials(n){ return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?'; }
 function avColor(n){ const cs=['#12395f','#175cd3','#15803d','#a15c07','#7b3f9e','#b42318','#0e7490','#c9a227']; let h=0; for(const c of (n||'x')) h=(h+c.charCodeAt(0))%cs.length; return cs[h]; }
 function dlg(html){ const d=$('#dlg'); d.innerHTML=html; d.showModal(); }
@@ -149,7 +151,7 @@ const NAV=[
 function drawShell(){
   $('#app').innerHTML=`
    <aside class="sidebar">
-     <div class="brand"><div class="logo">Kartav<span>ya</span></div><div class="sub">KSK ERP 1.0 · Accountability</div></div>
+     <div class="brand"><div class="logo">${esc(possessive(ME.full_name))} Task <span>List</span></div><div class="sub">KSK ERP 1.0 · Accountability</div></div>
      <div class="navsec"><div class="h">MAIN</div><div id="nav"></div></div>
      <div class="navsec"><div class="h">MODULES</div>
        <a class="navitem" href="./index.html"><span class="ic">▤</span><span class="lbl">Dashboard</span></a>
@@ -157,7 +159,7 @@ function drawShell(){
        <a class="navitem" href="./sales.html"><span class="ic">₹</span><span class="lbl">Sales</span></a>
        <a class="navitem" href="./production.html"><span class="ic">⚙</span><span class="lbl">Production</span></a>
        <a class="navitem" href="./masters.html"><span class="ic">☰</span><span class="lbl">Masters</span></a>
-       <div class="navitem on"><span class="ic">✓</span><span class="lbl">Kartavya</span></div>
+       <div class="navitem on"><span class="ic">✓</span><span class="lbl">Task List</span></div>
        <a class="navitem" href="./ddr.html"><span class="ic">▤</span><span class="lbl">Daily Report</span></a>
      </div>
      <div class="spacer"></div>
@@ -489,6 +491,7 @@ async function refreshBadges(){
   if(error||!data?.length){ location.href='./index.html'; return; }
   ME=data[0];
   USERS=await q('v_users', x=>x.order('full_name'));
+  document.title = possessive(ME.full_name)+' Task List · KSK ERP';
   await refreshBadges();
   drawShell(); go('overview');
 })();
