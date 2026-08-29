@@ -248,31 +248,13 @@ function taskTable(tasks){
 // up to Assigned, so Overdue means past its date and never ticked, which includes
 // daily items that lapsed.
 async function summaryScreen(mode){
-  const from=OV_FROM, to=OV_TO||today(), t=today();
-  const [tasks,marks,users]=await Promise.all([
-    qAll('v_tasks', x=>x.gte('due_current',from).lte('due_current',to)),
-    qAll('v_checklist_marks', x=>x.gte('due_date',from).lte('due_date',to).neq('status','amnesty')),
-    q('v_users', x=>x.order('full_name'))
-  ]);
-  const P={};
-  const prow=n=>P[n]||(P[n]={name:n,assigned:0,ontime:0,late:0,pending:0,overdue:0});
-  users.forEach(u=>prow(u.full_name));
-  tasks.filter(x=>x.status!=='CANCELLED').forEach(x=>{
-    const r=prow(x.assignee_name||'-'); r.assigned++;
-    if(x.status==='DONE') r.ontime++;
-    else if(x.status==='DONE_LATE') r.late++;
-    else if(x.due_current<t) r.overdue++;
-    else r.pending++;
-  });
-  marks.forEach(m=>{
-    const r=prow(m.assignee_name||'-'); r.assigned++;
-    if(m.status==='done') r.ontime++;
-    else if(m.status==='done_late') r.late++;
-    else if(m.status==='pending'&&m.due_date>=t) r.pending++;
-    else r.overdue++;
-  });
-
-  const people=Object.values(P).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name));
+  const from=OV_FROM, to=OV_TO||today();
+  view(`${topbar(mode==='ontime'?'On-Time Performance':'Completion',`${fmt(from)} to ${fmt(to)}`,'')}
+        <div class="panel"><p style="color:var(--muted);padding:20px">Loading…</p></div>`);
+  const {data,error}=await sb.rpc('kart_summary',{p_from:from,p_to:to});
+  if(error){ toast(error.message); }
+  const people=(data||[]).map(r=>({name:r.full_name,assigned:+r.assigned,ontime:+r.ontime,
+                                   late:+r.late,pending:+r.pending,overdue:+r.overdue}));
   const T=people.reduce((s,r)=>({assigned:s.assigned+r.assigned,ontime:s.ontime+r.ontime,late:s.late+r.late,
                                  pending:s.pending+r.pending,overdue:s.overdue+r.overdue}),
                         {assigned:0,ontime:0,late:0,pending:0,overdue:0});
