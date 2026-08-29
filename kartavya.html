@@ -108,6 +108,7 @@ const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 
 let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
 let OV_TASKS=[], PEND={}, BADGE={pending:0,mytasks:0,checklists:0};
+let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
   'ea@kskenggind.com':'916290154899',
   'accounts@kskenggind.com':'919300240411',
@@ -130,6 +131,19 @@ const isAdmin=()=>ME&&(ME.role==='DIRECTOR'||ME.role==='ADMIN');
 function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',2600); }
 async function rpc(fn,args){ const {data,error}=await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
 async function q(view,mod){ let x=sb.from(view).select('*'); if(mod)x=mod(x); const {data,error}=await x; if(error){ toast(error.message); return []; } return data; }
+// Paged read. A plain select() stops at PostgREST's 1000-row cap with no error,
+// which silently under-counts once a range covers more than ~1000 occurrences.
+async function qAll(view,mod){
+  const PAGE=1000; let out=[], from=0;
+  for(;;){
+    let x=sb.from(view).select('*'); if(mod)x=mod(x);
+    const {data,error}=await x.range(from,from+PAGE-1);
+    if(error){ toast(error.message); return out; }
+    out=out.concat(data||[]);
+    if(!data || data.length<PAGE) return out;
+    from+=PAGE;
+  }
+}
 function firstName(n){ return (n||'').trim().split(/\s+/)[0] || 'My'; }
 function possessive(n){ const f=firstName(n); return /s$/i.test(f) ? f+"'" : f+"'s"; }
 function initials(n){ return (n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?'; }
@@ -140,7 +154,7 @@ function view(html){ $('#view').innerHTML=html; document.body.classList.remove('
 
 // ---- nav / shell ----
 const NAV=[
-  {id:'overview',  label:'Task Overview',   icon:'📋', admin:false},
+  {id:'overview',  label:'Task Overview',   icon:'📋', admin:true},
   {id:'pending',   label:'Pending Tasks',   icon:'⚠️', admin:true},
   {id:'mytasks',   label:'My Tasks',        icon:'🗒️', admin:false},
   {id:'progress',  label:'Overall Progress',icon:'🎯', admin:true},
@@ -177,7 +191,8 @@ function drawNav(){
     return `<div class="navitem ${TAB===n.id?'on':''}" onclick="go('${n.id}')"><span class="ic">${n.icon}</span><span class="lbl">${n.label}</span>${badge}</div>`;
   }).join('');
 }
-function go(t){ TAB=t; drawNav(); (render[t]||render.overview)(); }
+function go(t){ if(NAV.find(n=>n.id===t&&n.admin)&&!isAdmin()) t='mytasks';
+  TAB=t; drawNav(); (render[t]||render[isAdmin()?'overview':'mytasks'])(); }
 
 function topbar(title,sub,right){
   return `<div class="topbar">
@@ -225,23 +240,96 @@ function taskTable(tasks){
 // ---- screens ----
 const render={
   async overview(){
-    const tasks=await q('v_tasks', x=>x.order('created_at',{ascending:false}));
-    OV_TASKS=tasks; const t=today();
-    const open=tasks.filter(x=>x.status==='OPEN');
-    const completed=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE');
-    const overdue=open.filter(x=>x.due_current<t);
-    view(`${topbar('Task Overview',dateStr(), isAdmin()?`<button class="btn green" onclick="go('assign')">＋ Assign New Task</button>`:'')}
+    // Director/Admin only (Prateek + Smita). Everything in this module is really
+    // recurring duties, so the counts combine one-off tasks with checklist
+    // occurrences. Amnestied occurrences are excluded - they were written off.
+    // Buckets are mutually exclusive and add up to Assigned:
+    //   Completed = done / done_late (tasks: DONE / DONE_LATE)
+    //   Pending   = due today or later, not yet ticked
+    //   Overdue   = past its date and never ticked (includes lapsed daily items)
+    const from=OV_FROM, to=OV_TO||today(), t=today();
+    const [tasks,marks,users]=await Promise.all([
+      qAll('v_tasks', x=>x.gte('due_current',from).lte('due_current',to)),
+      qAll('v_checklist_marks', x=>x.gte('due_date',from).lte('due_date',to).neq('status','amnesty')),
+      q('v_users', x=>x.order('full_name'))
+    ]);
+    OV_TASKS=tasks.filter(x=>x.status!=='CANCELLED');
+
+    const P={};
+    const prow=n=>P[n]||(P[n]={name:n,assigned:0,completed:0,pending:0,overdue:0});
+    users.forEach(u=>prow(u.full_name));
+    OV_TASKS.forEach(x=>{
+      const r=prow(x.assignee_name||'-'); r.assigned++;
+      if(x.status==='DONE'||x.status==='DONE_LATE') r.completed++;
+      else if(x.due_current<t) r.overdue++;
+      else r.pending++;
+    });
+    marks.forEach(m=>{
+      const r=prow(m.assignee_name||'-'); r.assigned++;
+      if(m.status==='done'||m.status==='done_late') r.completed++;
+      else if(m.status==='pending'&&m.due_date>=t) r.pending++;
+      else r.overdue++;
+    });
+
+    const people=Object.values(P).sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name));
+    const T=people.reduce((s,r)=>({assigned:s.assigned+r.assigned,completed:s.completed+r.completed,
+                                   pending:s.pending+r.pending,overdue:s.overdue+r.overdue}),
+                          {assigned:0,completed:0,pending:0,overdue:0});
+    const pct=(a,b)=>b?Math.round(a/b*100):0;
+    const gap = from<'2026-07-13'
+      ? `<div style="background:#fff8e6;border:1px solid #e6d08a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#6b5310">
+           <b>Note:</b> the ERP holds no occurrences before 13 July 2026 - that is when the duties were first loaded.
+           Anything earlier reads as zero here, even though the work was recorded in the Google Sheets.
+         </div>` : '';
+
+    view(`${topbar('Task Overview',`${fmt(from)} to ${fmt(to)} · all employees`,
+        `<button class="btn green" onclick="go('assign')">＋ Assign New Task</button>`)}
+      <div class="panel" style="margin-bottom:14px">
+        <div class="ph" style="gap:10px;flex-wrap:wrap">
+          <h2 style="margin-right:auto">Date range</h2>
+          <label style="font-size:13px;color:var(--muted)">From
+            <input type="date" id="ov-from" value="${from}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
+          <label style="font-size:13px;color:var(--muted)">To
+            <input type="date" id="ov-to" value="${to}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
+          <button class="btn green" onclick="ovApply()">Apply</button>
+          <button class="btn ghost" onclick="ovPreset('2026-04-01')">FY to date</button>
+          <button class="btn ghost" onclick="ovPreset(monthStart())">This month</button>
+        </div>
+      </div>
+      ${gap}
       <div class="kpis">
-        ${kpi('Total Tasks',tasks.length,'')}
-        ${kpi('Pending',open.length,'blue')}
-        ${kpi('Completed',completed.length,'green')}
-        ${kpi('Overdue',overdue.length,'red')}
+        ${kpi('Total Tasks Assigned',T.assigned,'')}
+        ${kpi('Total Tasks Completed',T.completed,'green')}
+        ${kpi('Total Tasks Pending',T.pending,'blue')}
+        ${kpi('Total Tasks Overdue',T.overdue,'red')}
       </div>
       <div class="panel">
-        <div class="ph"><h2>All Tasks</h2>
-          <div class="search"><input id="ov-q" placeholder="🔍 Search name or task…" oninput="ovFilter()"></div>
+        <div class="ph"><h2>By employee</h2>
+          <span style="color:var(--muted);font-size:12px;margin-right:auto">&nbsp;${people.filter(r=>r.assigned).length} people with duties in this range</span>
           <button class="btn ghost" onclick="go('overview')">⟳ Refresh</button></div>
-        <div id="ov-table">${taskTable(tasks)}</div>
+        <table><thead><tr><th>Name</th><th class="num">Assigned</th><th class="num">Completed</th>
+          <th class="num">Pending</th><th class="num">Overdue</th><th>Completion</th></tr></thead><tbody>
+        ${people.map(r=>{
+          const p=pct(r.completed,r.assigned);
+          const c=p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
+          return `<tr${r.assigned?'':' style="opacity:.45"'}>
+            <td>${esc(r.name)}</td>
+            <td class="num">${r.assigned}</td>
+            <td class="num">${r.completed}</td>
+            <td class="num">${r.pending}</td>
+            <td class="num"${r.overdue?' style="color:var(--red);font-weight:700"':''}>${r.overdue}</td>
+            <td><div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:8px;background:#eef2f0;border-radius:5px;overflow:hidden">
+                <div style="width:${p}%;height:100%;background:${c}"></div></div>
+              <span style="font-size:12px;min-width:34px;text-align:right">${r.assigned?p+'%':'-'}</span></div></td></tr>`;
+        }).join('')}
+        </tbody>
+        <tfoot><tr class="total"><td>All employees</td><td class="num">${T.assigned}</td><td class="num">${T.completed}</td>
+          <td class="num">${T.pending}</td><td class="num">${T.overdue}</td>
+          <td>${pct(T.completed,T.assigned)}% completed</td></tr></tfoot></table>
+        <p style="color:var(--muted);font-size:12px;margin-top:10px">
+          Counts combine one-off tasks with recurring checklist occurrences. <b>Overdue</b> means past its date and never ticked,
+          including daily items that lapsed. Written-off (amnestied) occurrences are excluded.</p>
       </div>`);
   },
   async pending(){
@@ -419,7 +507,11 @@ function drawCharts(tasks,marks,t){
 }
 
 // ---- overview / pending helpers ----
-function ovFilter(){ const term=$('#ov-q').value.toLowerCase(); const f=OV_TASKS.filter(x=>((x.assignee_name||'')+' '+(x.title||'')).toLowerCase().includes(term)); $('#ov-table').innerHTML=taskTable(f); }
+function monthStart(){ return today().slice(0,8)+'01'; }
+function ovApply(){ const f=$('#ov-from').value, t=$('#ov-to').value;
+  if(f&&t&&f>t){ toast('From date is after the To date'); return; }
+  OV_FROM=f||'2026-04-01'; OV_TO=t||today(); go('overview'); }
+function ovPreset(f){ OV_FROM=f; OV_TO=today(); go('overview'); }
 function pendFilter(){ const term=$('#emp-q').value.toLowerCase(); document.querySelectorAll('#emp-list .emprow').forEach(el=>{ el.style.display=el.textContent.toLowerCase().includes(term)?'':'none'; }); }
 function pendSel(email){ const e=PEND[email]; if(!e)return; const t=today();
   $('#emp-detail').innerHTML=`<div class="ph"><h2>${esc(e.name||email)} · ${e.items.length} pending</h2>
@@ -493,7 +585,7 @@ async function refreshBadges(){
   USERS=await q('v_users', x=>x.order('full_name'));
   document.title = possessive(ME.full_name)+' Task List · KSK ERP';
   await refreshBadges();
-  drawShell(); go('overview');
+  drawShell(); go(isAdmin()?'overview':'mytasks');
 })();
 </script>
 <script>
