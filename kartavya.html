@@ -2,7 +2,7 @@
 <!-- ============================================================
      KSK ERP 1.0 — Module 1: TASK LIST (Accountability)
      Restructured to a TaskPro-style responsive sidebar dashboard.
-     Screens: Task Overview · Pending Tasks · My Tasks · Overall
+     Screens: Task Overview · Team Tasks · My Pending Tasks · Overall
      Progress · Dashboard · Checklists · Capture · (Assign Task).
      Deploys on GitHub Pages beside index.html. Upload whole, never edit.
      Security lives in Postgres RLS + guarded RPCs, not in this file.
@@ -155,8 +155,8 @@ function view(html){ $('#view').innerHTML=html; document.body.classList.remove('
 // ---- nav / shell ----
 const NAV=[
   {id:'overview',  label:'Task Overview',   icon:'📋', admin:true},
-  {id:'pending',   label:'Pending Tasks',   icon:'⚠️', admin:true},
-  {id:'mytasks',   label:'My Tasks',        icon:'🗒️', admin:false},
+  {id:'pending',   label:'Team Tasks',      icon:'⚠️', admin:true},
+  {id:'mytasks',   label:'My Pending Tasks',icon:'🗒️', admin:false},
   {id:'progress',  label:'Overall Progress',icon:'🎯', admin:true},
   {id:'dash',      label:'Dashboard',       icon:'📈', admin:true},
   {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
@@ -346,7 +346,7 @@ const render={
         <button class="wa" title="WhatsApp reminder" onclick="event.stopPropagation();waRemind('${esc(e.email)}','${esc(e.name||'')}',${e.items.length})">🟢</button>
       </div>`;
     }).join('') || '<p style="color:var(--muted)">No pending tasks. ✓</p>';
-    view(`${topbar('Pending Tasks','Select an employee to view their tasks','')}
+    view(`${topbar('Team Tasks','Select an employee to view their outstanding items','')}
       <div class="pendwrap">
         <div class="panel"><div class="ph"><h2>Employees</h2><span style="color:var(--muted);font-size:12px">${emps.length} people · ${tasks.length} tasks</span></div>
           <div class="search" style="max-width:none"><input id="emp-q" placeholder="🔍 Search employee…" oninput="pendFilter()"></div>
@@ -360,7 +360,7 @@ const render={
       q('v_checklist_marks', x=>x.eq('assignee_email',ME.email).in('status',['pending','overdue']).lte('due_date',today()).order('due_date'))
     ]);
     const t=today();
-    view(`${topbar('My Tasks',`${esc(ME.full_name)} — daily tasks & checklist`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
+    view(`${topbar('My Pending Tasks',`${esc(ME.full_name)} — duties still to tick off`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
       <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
         ${kpi('Open Tasks',ts.length,'blue')}
         ${kpi('Checklist Due',ms.length,'amber')}
