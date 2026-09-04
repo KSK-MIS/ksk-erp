@@ -346,26 +346,73 @@ const render={
       </div>`);
   },
   async mytasks(){
-    const [ts,ms]=await Promise.all([
+    // Team feedback 04-Sep-2026: this screen only ever showed items due TODAY, and in
+    // practice only Daily ones. Two causes, both fixed here:
+    //  1. it filtered status in ('pending','overdue'). A Daily duty that lapses becomes
+    //     'missed', so yesterday's undone work silently vanished. Missed items are now
+    //     shown for 14 days and are still tickable (checklist_mark records them late).
+    //  2. it filtered due_date <= today, so a Weekly/Monthly/Quarterly/Yearly duty was
+    //     invisible until its date arrived - and the sweep does not even create the
+    //     occurrence until then. "All my duties" below reads kart.checklists directly,
+    //     so everyone can see their whole list and when each one next falls due.
+    const t=today(), cutoff=addDays(t,-14);
+    const [ts,ms,cls]=await Promise.all([
       q('v_tasks', x=>x.eq('assignee_email',ME.email).eq('status','OPEN').order('due_current')),
-      q('v_checklist_marks', x=>x.eq('assignee_email',ME.email).in('status',['pending','overdue']).lte('due_date',today()).order('due_date'))
+      q('v_checklist_marks', x=>x.eq('assignee_email',ME.email)
+            .in('status',['pending','overdue','missed']).gte('due_date',cutoff).lte('due_date',t).order('due_date')),
+      q('v_checklists', x=>x.eq('assignee_email',ME.email).eq('active',true).order('next_due'))
     ]);
-    const t=today();
-    view(`${topbar('My Pending Tasks',`${esc(ME.full_name)} — duties still to tick off`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
-      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
-        ${kpi('Open Tasks',ts.length,'blue')}
-        ${kpi('Checklist Due',ms.length,'amber')}
-        ${kpi('Overdue',ts.filter(x=>x.due_current<t).length+ms.filter(m=>m.status==='overdue').length,'red')}
+    const dueToday = ms.filter(m=>m.status==='pending' && m.due_date===t);
+    const overdue  = ms.filter(m=>m.status==='overdue' || (m.status==='pending' && m.due_date<t));
+    const missed   = ms.filter(m=>m.status==='missed').sort((a,b)=>b.due_date.localeCompare(a.due_date));
+    const openTasks= ts;
+
+    const row=(m,extra)=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td>
+      <td>${fmt(m.due_date)}${extra||''}</td>
+      <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`;
+    const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+    const ORDER=['D','W','M','Q','H','Y'];
+    const byFreq={}; cls.forEach(c=>(byFreq[c.frequency]=byFreq[c.frequency]||[]).push(c));
+
+    view(`${topbar('My Pending Tasks',`${esc(ME.full_name)} — everything on your plate`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
+      <div class="kpis">
+        ${kpi('Due today',dueToday.length+openTasks.filter(x=>x.due_current<=t).length,'blue')}
+        ${kpi('Overdue',overdue.length+openTasks.filter(x=>x.due_current<t).length,'red')}
+        ${kpi('Missed, last 14 days',missed.length,'amber')}
+        ${kpi('My duties in total',cls.length,'')}
       </div>
-      <div class="panel"><div class="ph"><h2>Today's Checklist</h2></div>
-        ${ms.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th><th>Action</th></tr></thead><tbody>`+
-          ms.map(m=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td><td>${fmt(m.due_date)} ${m.status==='overdue'?`<span class="pill late">overdue ×${m.overdue_count}</span>`:''}</td>
-            <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`).join('')+`</tbody></table>`
+
+      <div class="panel"><div class="ph"><h2>Due today</h2></div>
+        ${dueToday.length?tbl(dueToday.map(m=>row(m)),'Due')
           :'<p style="color:var(--muted)">Nothing due today ✓</p>'}
       </div>
-      <div class="panel"><div class="ph"><h2>My Open Tasks</h2></div>
-        ${ts.length?`<table><thead><tr><th>Task ID</th><th>Task</th><th>From</th><th>Deadline</th><th>Action</th></tr></thead><tbody>`+
-          ts.map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td>
+
+      <div class="panel"><div class="ph"><h2>Overdue — still carried forward</h2>
+        <span style="color:var(--muted);font-size:12px">These stay on your list until ticked</span></div>
+        ${overdue.length?tbl(overdue.map(m=>row(m,` <span class="pill late">${daysBetween(m.due_date,t)} days late</span>`)),'Was due')
+          :'<p style="color:var(--muted)">Nothing overdue ✓</p>'}
+      </div>
+
+      <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
+        <span style="color:var(--muted);font-size:12px">Daily duties lapse when their day passes — you can still tick them, and it records as late</span></div>
+        ${missed.length?tbl(missed.map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
+          :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
+      </div>
+
+      <div class="panel"><div class="ph"><h2>All my duties</h2>
+        <span style="color:var(--muted);font-size:12px">${cls.length} in total, with the date each one next falls due</span></div>
+        ${cls.length?ORDER.filter(f=>byFreq[f]).map(f=>`
+          <h3 style="margin:14px 0 6px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">${FREQ[f]||f} · ${byFreq[f].length}</h3>
+          <table><thead><tr><th>Duty</th><th>Next due</th></tr></thead><tbody>
+          ${byFreq[f].map(c=>`<tr><td>${esc(c.title)}</td><td>${fmt(c.next_due)}${c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}
+          </tbody></table>`).join('')
+          :'<p style="color:var(--muted)">No duties assigned to you.</p>'}
+      </div>
+
+      <div class="panel"><div class="ph"><h2>My open tasks</h2></div>
+        ${openTasks.length?`<table><thead><tr><th>Task ID</th><th>Task</th><th>From</th><th>Deadline</th><th>Action</th></tr></thead><tbody>`+
+          openTasks.map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td>
             <td>${esc(x.title)}${x.detail?`<br><span style="color:var(--muted);font-size:12px">${esc(x.detail)}</span>`:''}</td>
             <td>${esc(x.assigned_by_name||'')}</td>
             <td>${fmt(x.due_current)} ${x.due_current<t?'<span class="pill late">overdue</span>':''}</td>
@@ -475,6 +522,8 @@ function drawCharts(tasks,marks,t){
 }
 
 // ---- overview / pending helpers ----
+function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
 function monthStart(){ return today().slice(0,8)+'01'; }
 function ovApply(tab){ const f=$('#ov-from').value, t=$('#ov-to').value;
   if(f&&t&&f>t){ toast('From date is after the To date'); return; }
