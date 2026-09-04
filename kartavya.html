@@ -373,6 +373,9 @@ const render={
     // rows arrives as an array; interpolating one directly joins it with commas
     const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
 
+    const MISS_SHOWN=20, horizon=addDays(t,7);
+    const soon = cls.filter(c=>c.next_due>t && c.next_due<=horizon)
+                    .sort((a,b)=>a.next_due.localeCompare(b.next_due)||a.title.localeCompare(b.title));
     const ORDER=['D','W','M','Q','H','Y'];
     const byFreq={}; cls.forEach(c=>(byFreq[c.frequency]=byFreq[c.frequency]||[]).push(c));
 
@@ -395,10 +398,13 @@ const render={
           :'<p style="color:var(--muted)">Nothing overdue ✓</p>'}
       </div>
 
-      <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
-        <span style="color:var(--muted);font-size:12px">Daily duties lapse when their day passes — you can still tick them, and it records as late</span></div>
-        ${missed.length?tbl(missed.map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
-          :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
+      <div class="panel"><div class="ph"><h2>Coming up in the next 7 days</h2>
+        <span style="color:var(--muted);font-size:12px">Weekly and monthly duties appear here before their day arrives</span></div>
+        ${soon.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th></tr></thead><tbody>
+          ${soon.map(c=>`<tr><td>${esc(c.title)}</td><td>${FREQ[c.frequency]||c.frequency}</td>
+            <td>${dayName(c.next_due)} ${fmt(c.next_due)}</td></tr>`).join('')}
+          </tbody></table>`
+          :'<p style="color:var(--muted)">Nothing falls due in the next 7 days.</p>'}
       </div>
 
       <div class="panel"><div class="ph"><h2>All my duties</h2>
@@ -406,9 +412,16 @@ const render={
         ${cls.length?ORDER.filter(f=>byFreq[f]).map(f=>`
           <h3 style="margin:14px 0 6px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">${FREQ[f]||f} · ${byFreq[f].length}</h3>
           <table><thead><tr><th>Duty</th><th>Next due</th></tr></thead><tbody>
-          ${byFreq[f].map(c=>`<tr><td>${esc(c.title)}</td><td>${fmt(c.next_due)}${c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}
+          ${byFreq[f].map(c=>`<tr><td>${esc(c.title)}</td><td>${dayName(c.next_due)} ${fmt(c.next_due)}${c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}
           </tbody></table>`).join('')
           :'<p style="color:var(--muted)">No duties assigned to you.</p>'}
+      </div>
+
+      <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
+        <span style="color:var(--muted);font-size:12px">Daily duties lapse when their day passes — you can still tick them, and it records as late</span></div>
+        ${missed.length?tbl(missed.slice(0,MISS_SHOWN).map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
+            +(missed.length>MISS_SHOWN?`<p style="color:var(--muted);font-size:12px;margin-top:8px">Showing the most recent ${MISS_SHOWN} of ${missed.length}.</p>`:'')
+          :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
       </div>
 
       <div class="panel"><div class="ph"><h2>My open tasks</h2></div>
@@ -523,6 +536,7 @@ function drawCharts(tasks,marks,t){
 }
 
 // ---- overview / pending helpers ----
+function dayName(iso){ return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(iso+'T00:00:00').getDay()]; }
 function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
 function monthStart(){ return today().slice(0,8)+'01'; }
