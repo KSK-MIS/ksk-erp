@@ -370,7 +370,8 @@ const render={
     const row=(m,extra)=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td>
       <td>${fmt(m.due_date)}${extra||''}</td>
       <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`;
-    const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+    // rows arrives as an array; interpolating one directly joins it with commas
+    const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
 
     const ORDER=['D','W','M','Q','H','Y'];
     const byFreq={}; cls.forEach(c=>(byFreq[c.frequency]=byFreq[c.frequency]||[]).push(c));
