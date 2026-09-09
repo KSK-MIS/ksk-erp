@@ -212,12 +212,29 @@ body.ksk-on .ksk-sb{ display:flex; }
 <section id="screen-login">
   <div class="card">
     <h3>Sign in</h3>
-    <p class="muted">Use your company Google account. If Google sign-in is unavailable, request an email link below.</p>
-    <button class="btn" id="btn-google" style="margin-top:14px">Sign in with Google</button>
-    <label for="email">Email address (fallback)</label>
-    <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email">
-    <button class="btn ghost" id="btn-login">Send sign-in link</button>
+
+    <div id="step-email">
+      <p class="muted">Enter your company email address. We will send you a 6-digit code.</p>
+      <label for="email">Email address</label>
+      <input id="email" type="email" placeholder="name@kskenggind.com" autocomplete="email" inputmode="email">
+      <button class="btn" id="btn-login">Email me a 6-digit code</button>
+    </div>
+
+    <div id="step-code" style="display:none">
+      <p class="muted">We sent a 6-digit code to <b id="code-to"></b>. It is at the top of the email and is valid for one hour.</p>
+      <label for="code">6-digit code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="letter-spacing:6px;font-size:20px;text-align:center">
+      <button class="btn" id="btn-verify">Verify &amp; sign in</button>
+      <button class="btn ghost" id="btn-back" style="margin-top:8px">Use a different email</button>
+    </div>
+
     <div class="msg" id="login-msg"></div>
+
+    <details style="margin-top:16px">
+      <summary class="muted" style="cursor:pointer">Other ways to sign in</summary>
+      <button class="btn ghost" id="btn-google" style="margin-top:10px">Sign in with Google</button>
+      <p class="muted" style="font-size:12px;margin-top:8px">The same email also contains a sign-in link further down. It only works in the browser you requested it from, so the code above is more reliable.</p>
+    </details>
   </div>
 </section>
 
@@ -317,12 +334,39 @@ $('btn-google').onclick=async()=>{
   const{error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname}});
   if(error) msg('login-msg',error.message,'err');
 };
+// Two-step 6-digit code. The Supabase "Magic link or OTP" template leads with
+// {{ .Token }}, so the page MUST offer somewhere to type that code. A link-only
+// version of this screen locked Smita out twice (20-Aug and again 09-Sep) — she
+// received a code with no box to enter it. After ANY index.html redeploy, verify
+// against the LIVE page that verifyOtp is present, not just the local file.
+let OTP_EMAIL='';
+function loginStep(which){
+  $('step-email').style.display = which==='email' ? 'block':'none';
+  $('step-code').style.display  = which==='code'  ? 'block':'none';
+}
 $('btn-login').onclick=async()=>{
   const email=$('email').value.trim().toLowerCase();
   if(!email){msg('login-msg','Please enter your email address.','err');return;}
-  const{error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
-  error?msg('login-msg',error.message,'err'):msg('login-msg','Link sent. Open it on this device, in this browser.','ok');
+  $('btn-login').disabled=true; msg('login-msg','Sending…','');
+  const{error}=await sb.auth.signInWithOtp({email,options:{shouldCreateUser:false,emailRedirectTo:location.origin+location.pathname}});
+  $('btn-login').disabled=false;
+  if(error){ msg('login-msg',error.message,'err'); return; }
+  OTP_EMAIL=email; $('code-to').textContent=email;
+  loginStep('code'); msg('login-msg','Code sent. Check your inbox — it is at the top of the email.','ok');
+  setTimeout(()=>$('code').focus(),50);
 };
+$('btn-verify').onclick=async()=>{
+  const token=$('code').value.trim().replace(/\D/g,'');
+  if(token.length!==6){msg('login-msg','Enter the 6-digit code from the email.','err');return;}
+  $('btn-verify').disabled=true; msg('login-msg','Checking…','');
+  const{error}=await sb.auth.verifyOtp({email:OTP_EMAIL,token,type:'email'});
+  $('btn-verify').disabled=false;
+  if(error){ msg('login-msg',error.message,'err'); return; }
+  location.reload();
+};
+$('btn-back').onclick=()=>{ loginStep('email'); msg('login-msg','',''); };
+$('code').addEventListener('keydown',e=>{ if(e.key==='Enter') $('btn-verify').click(); });
+$('email').addEventListener('keydown',e=>{ if(e.key==='Enter') $('btn-login').click(); });
 async function signOut(){await sb.auth.signOut();location.reload();}
 function show(id){['screen-login','screen-denied','screen-app'].forEach(s=>$(s).style.display=s===id?'block':'none');document.body.classList.toggle('ksk-on',id==='screen-app');}
 
