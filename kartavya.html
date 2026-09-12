@@ -324,25 +324,68 @@ async function summaryScreen(mode){
 const render={
   async overview(){ await summaryScreen('coverage'); },
   async pending(){
-    const tasks=await q('v_tasks', x=>x.eq('status','OPEN'));
-    const t=today(); PEND={};
-    tasks.forEach(x=>{ const k=x.assignee_email||'?'; (PEND[k]=PEND[k]||{name:x.assignee_name,email:k,items:[]}).items.push(x); });
-    const emps=Object.values(PEND).sort((a,b)=>b.items.length-a.items.length);
+    // Rewritten 12-Sep-2026. This screen used to read ONLY kart.tasks (one-off tasks)
+    // with status OPEN. Nobody has ever created a one-off task - all 153 duties are
+    // recurring checklists - so it rendered "No pending tasks" for every single user,
+    // Prateek included. It is now what its name says: everyone's outstanding duties.
+    // Same three buckets as My Pending Tasks, so the two screens agree:
+    //   due today · overdue (carried forward) · missed in the last 14 days (still tickable)
+    const t=today(), cutoff=addDays(t,-14);
+    const [tasks,marks]=await Promise.all([
+      q('v_tasks', x=>x.eq('status','OPEN')),
+      qAll('v_checklist_marks', x=>x.in('status',['pending','overdue','missed'])
+             .gte('due_date',cutoff).lte('due_date',t).order('due_date'))
+    ]);
+
+    PEND={};
+    const bucket=m => m.status==='missed' ? 'missed'
+                    : (m.status==='overdue' || m.due_date<t) ? 'overdue' : 'today';
+    const slot=(email,name)=>PEND[email]||(PEND[email]={name,email,items:[],today:0,overdue:0,missed:0});
+    marks.forEach(m=>{
+      const e=slot(m.assignee_email||'?', m.assignee_name);
+      const b=bucket(m); e[b]++;
+      e.items.push({kind:'duty', id:m.id, title:m.title, freq:m.frequency, due:m.due_date, bucket:b});
+    });
+    tasks.forEach(x=>{
+      const e=slot(x.assignee_email||'?', x.assignee_name);
+      const b=x.due_current<t?'overdue':'today'; e[b]++;
+      e.items.push({kind:'task', id:x.id, title:x.title, freq:'—', due:x.due_current,
+                    bucket:b, task_no:x.task_no});
+    });
+
+    const emps=Object.values(PEND)
+      .sort((a,b)=>(b.overdue+b.missed)-(a.overdue+a.missed) || b.items.length-a.items.length
+                 || (a.name||'').localeCompare(b.name||''));
+    const T=emps.reduce((s,e)=>({today:s.today+e.today,overdue:s.overdue+e.overdue,
+                                 missed:s.missed+e.missed,n:s.n+e.items.length}),
+                        {today:0,overdue:0,missed:0,n:0});
+
     const list=emps.map(e=>{
-      const od=e.items.filter(x=>x.due_current<t).length;
+      const bits=[];
+      if(e.today)   bits.push(`${e.today} due today`);
+      if(e.overdue) bits.push(`<span style="color:var(--red);font-weight:700">${e.overdue} overdue</span>`);
+      if(e.missed)  bits.push(`<span style="color:var(--warn)">${e.missed} missed</span>`);
       return `<div class="emprow" onclick="pendSel('${esc(e.email)}')">
         <div class="av" style="background:${avColor(e.name)}">${initials(e.name)}</div>
         <div style="flex:1"><div style="font-weight:700">${esc(e.name||e.email)}</div>
-          <div style="font-size:12px;color:var(--muted)">${e.items.length} pending${od?` · <span style="color:var(--red)">${od} overdue</span>`:''}</div></div>
+          <div style="font-size:12px;color:var(--muted)">${bits.join(' · ')||'nothing outstanding'}</div></div>
         <button class="wa" title="WhatsApp reminder" onclick="event.stopPropagation();waRemind('${esc(e.email)}','${esc(e.name||'')}',${e.items.length})">🟢</button>
       </div>`;
-    }).join('') || '<p style="color:var(--muted)">No pending tasks. ✓</p>';
-    view(`${topbar('Team Tasks','Select an employee to view their outstanding items','')}
+    }).join('') || '<p style="color:var(--muted)">Nothing outstanding anywhere. ✓</p>';
+
+    view(`${topbar('Team Tasks','Everything outstanding across the team — select a person to see their list','')}
+      <div class="kpis">
+        ${kpi('Due today',T.today,'blue')}
+        ${kpi('Overdue',T.overdue,'red')}
+        ${kpi('Missed (14 days)',T.missed,'amber')}
+        ${kpi('People with items',emps.filter(e=>e.items.length).length,'')}
+      </div>
       <div class="pendwrap">
-        <div class="panel"><div class="ph"><h2>Employees</h2><span style="color:var(--muted);font-size:12px">${emps.length} people · ${tasks.length} tasks</span></div>
+        <div class="panel"><div class="ph"><h2>Employees</h2>
+          <span style="color:var(--muted);font-size:12px">${emps.length} people · ${T.n} items</span></div>
           <div class="search" style="max-width:none"><input id="emp-q" placeholder="🔍 Search employee…" oninput="pendFilter()"></div>
           <div id="emp-list" style="margin-top:10px">${list}</div></div>
-        <div class="panel" id="emp-detail"><p style="color:var(--muted);text-align:center;padding:40px">Select an employee to view their pending tasks</p></div>
+        <div class="panel" id="emp-detail"><p style="color:var(--muted);text-align:center;padding:40px">Select an employee to view their outstanding duties</p></div>
       </div>`);
   },
   async mytasks(){
@@ -545,12 +588,22 @@ function ovApply(tab){ const f=$('#ov-from').value, t=$('#ov-to').value;
   OV_FROM=f||'2026-04-01'; OV_TO=t||today(); go(tab||'overview'); }
 function ovPreset(f,tab){ OV_FROM=f; OV_TO=today(); go(tab||'overview'); }
 function pendFilter(){ const term=$('#emp-q').value.toLowerCase(); document.querySelectorAll('#emp-list .emprow').forEach(el=>{ el.style.display=el.textContent.toLowerCase().includes(term)?'':'none'; }); }
-function pendSel(email){ const e=PEND[email]; if(!e)return; const t=today();
-  $('#emp-detail').innerHTML=`<div class="ph"><h2>${esc(e.name||email)} · ${e.items.length} pending</h2>
+function pendSel(email){ const e=PEND[email]; if(!e)return;
+  const TAG={today:'<span class="pill open">Due today</span>',
+             overdue:'<span class="pill late">Overdue</span>',
+             missed:'<span class="pill warn">Missed</span>'};
+  const ORDER={overdue:0,today:1,missed:2};
+  const rows=e.items.slice()
+    .sort((a,b)=>ORDER[a.bucket]-ORDER[b.bucket] || a.due.localeCompare(b.due) || a.title.localeCompare(b.title))
+    .map(x=>`<tr><td>${esc(x.title)}</td>
+       <td>${x.kind==='duty'?(FREQ[x.freq]||x.freq):'<span class="idbadge">'+esc(x.task_no||'Task')+'</span>'}</td>
+       <td>${fmt(x.due)}</td><td>${TAG[x.bucket]||''}</td></tr>`).join('');
+  $('#emp-detail').innerHTML=`<div class="ph"><h2>${esc(e.name||email)}</h2>
+     <span style="color:var(--muted);font-size:12px;margin-right:auto">&nbsp;${e.items.length} outstanding</span>
      <button class="wa push" onclick="waRemind('${esc(email)}','${esc(e.name||'')}',${e.items.length})">🟢</button></div>
-   <table><thead><tr><th>Task ID</th><th>Task</th><th>Plan</th><th>Deadline</th><th>Status</th></tr></thead><tbody>${
-     e.items.slice().sort((a,b)=>a.due_current<b.due_current?-1:1).map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td><td>${esc(x.title)}</td><td>${fmt(x.due_original)}</td><td>${fmt(x.due_current)}</td><td>${taskStatus(x)}</td></tr>`).join('')
-   }</tbody></table>`;
+   <table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th><th>Status</th></tr></thead>
+   <tbody>${rows||'<tr><td colspan="4" style="color:var(--muted)">Nothing outstanding ✓</td></tr>'}</tbody></table>
+   <p style="color:var(--muted);font-size:12px;margin-top:10px">Only the person the duty belongs to can tick it off, from their own My Pending Tasks screen.</p>`;
 }
 function waRemind(email,name,n){
   const ph=PHONES[email];
