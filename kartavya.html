@@ -405,24 +405,31 @@ const render={
     // Team feedback 04-Sep-2026: this screen only ever showed items due TODAY, and in
     // practice only Daily ones. Two causes, both fixed:
     //  1. it filtered status in ('pending','overdue'). A Daily duty that lapses becomes
-    //     'missed', so yesterday's undone work silently vanished. Missed items are now
-    //     shown for 14 days and are still tickable (checklist_mark records them late).
+    //     'missed', so yesterday's undone work silently vanished. A "Missed in the last
+    //     14 days" panel was added to surface them; Prateek had it removed 14-Sep-2026,
+    //     so lapsed dailies are once again invisible here (by choice, not by accident).
     //  2. it filtered due_date <= today, so a Weekly/Monthly+ duty was invisible until
     //     its date arrived - and the sweep does not create the occurrence until then.
     //     The duty sections below read kart.checklists directly.
     // Restructured 14-Sep-2026 on Prateek's instructions: open tasks first, KPI tiles
     // dropped (they looked clickable but were not), the 7-day look-ahead replaced by
     // "Due This Month", and the full duty list put behind a frequency picker.
-    const t=today(), cutoff=addDays(t,-14), mEnd=monthEnd();
+    // 'missed' is deliberately NOT fetched any more - the Missed panel was removed
+    // 14-Sep-2026 on Prateek's instruction. NOTE this also means a lapsed Daily duty can
+    // no longer be ticked from this screen; see the note in the project memory.
+    // The old query also had a 14-day floor on due_date, which would have hidden any
+    // carried-forward item older than a fortnight. Nothing was being hidden in practice
+    // (every 'overdue' row currently falls inside 14 days) but the floor is gone now, so
+    // an old carry-forward can never silently vanish.
+    const t=today(), mEnd=monthEnd();
     const [ts,ms,cls]=await Promise.all([
       q('v_tasks', x=>x.eq('assignee_email',ME.email).eq('status','OPEN').order('due_current')),
       q('v_checklist_marks', x=>x.eq('assignee_email',ME.email)
-            .in('status',['pending','overdue','missed']).gte('due_date',cutoff).lte('due_date',t).order('due_date')),
+            .in('status',['pending','overdue']).lte('due_date',t).order('due_date')),
       q('v_checklists', x=>x.eq('assignee_email',ME.email).eq('active',true).order('next_due'))
     ]);
     const dueToday = ms.filter(m=>m.status==='pending' && m.due_date===t);
     const overdue  = ms.filter(m=>m.status==='overdue' || (m.status==='pending' && m.due_date<t));
-    const missed   = ms.filter(m=>m.status==='missed').sort((a,b)=>b.due_date.localeCompare(a.due_date));
     const openTasks= ts;
 
     const row=(m,extra)=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td>
@@ -431,7 +438,6 @@ const render={
     // rows arrives as an array; interpolating one directly joins it with commas
     const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
 
-    const MISS_SHOWN=20;
     // Everything still to fall due before the month is out, any frequency. kart.sweep
     // always advances next_due past today, so these are genuinely upcoming, not backlog.
     const thisMonth = cls.filter(c=>c.next_due<=mEnd)
@@ -480,12 +486,7 @@ const render={
         <div id="duty-body"></div>
       </div>
 
-      <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
-        <span style="color:var(--muted);font-size:12px">Daily duties lapse when their day passes — you can still tick them, and it records as late</span></div>
-        ${missed.length?tbl(missed.slice(0,MISS_SHOWN).map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
-            +(missed.length>MISS_SHOWN?`<p style="color:var(--muted);font-size:12px;margin-top:8px">Showing the most recent ${MISS_SHOWN} of ${missed.length}.</p>`:'')
-          :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
-      </div>`);
+`);
     dutyRender();
   },
   async progress(){ await summaryScreen('ontime'); },
