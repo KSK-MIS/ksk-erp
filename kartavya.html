@@ -480,7 +480,9 @@ const render={
       <div class="panel"><div class="ph"><h2>All my duties</h2>
         <span style="color:var(--muted);font-size:12px">${cls.length} in total — choose a frequency to see them</span></div>
         <div id="duty-picker" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-          ${['D','W','M','Q','H','Y'].map(f=>`<button class="btn ghost" data-f="${f}" onclick="dutyShow('${f}')">${FREQ[f]}${MY_CLS.filter(c=>c.frequency===f).length?` (${MY_CLS.filter(c=>c.frequency===f).length})`:''}</button>`).join('')}
+          ${['D','W','M','Q','H','Y'].map(f=>({f,n:cls.filter(c=>c.frequency===f).length}))
+              .filter(x=>x.n)   // a frequency this person has none of gets no button at all
+              .map(x=>`<button class="btn ghost" data-f="${x.f}" onclick="dutyShow('${x.f}')">${FREQ[x.f]} (${x.n})</button>`).join('')}
           <button class="btn ghost" data-f="ALL" onclick="dutyShow('ALL')">Show All</button>
         </div>
         <div id="duty-body"></div>
