@@ -2,8 +2,8 @@
 <!-- ============================================================
      KSK ERP 1.0 — Module 1: TASK LIST (Accountability)
      Restructured to a TaskPro-style responsive sidebar dashboard.
-     Screens: Completion · Team Tasks · My Pending Tasks · On-Time
-     Progress · Dashboard · Checklists · Capture · (Assign Task).
+     Screens, in sidebar order: Assign Task · My Pending Tasks ·
+     Task Reminder · Performance · Checklists.
      Deploys on GitHub Pages beside index.html. Upload whole, never edit.
      Security lives in Postgres RLS + guarded RPCs, not in this file.
      ============================================================ -->
@@ -156,8 +156,8 @@ function view(html){ $('#view').innerHTML=html; document.body.classList.remove('
 const NAV=[
   {id:'assign',    label:'Assign Task',     icon:'➕', admin:true},
   {id:'mytasks',   label:'My Pending Tasks',icon:'🗒️', admin:false},
-  {id:'pending',   label:'Team Tasks',      icon:'⚠️', admin:true},
-  {id:'progress',  label:'On-Time Performance',icon:'🎯', admin:true},
+  {id:'pending',   label:'Task Reminder',   icon:'⚠️', admin:true},
+  {id:'progress',  label:'Performance',     icon:'🎯', admin:true},
   {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
 ];
 function drawShell(){
@@ -235,43 +235,46 @@ function taskTable(tasks){
   return `<table><thead><tr><th>Task ID</th><th>Name</th><th>Task</th><th>Plan Date</th><th>Actual Date</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-// ---- shared summary screen -------------------------------------------------
-// Completion and On-Time Performance are the SAME page. Identical tiles, identical
-// per-employee table, identical date range. The only difference is how the final
-// percentage is worked out:
-//   coverage : (on time + late) / assigned          - did the duty happen at all
-//   ontime   : (on time + late/2) / assigned        - a late tick earns half credit
+// ---- Performance screen -----------------------------------------------------
+// One screen, BOTH measures. Prateek 14-Sep-2026: "show the completion performance and
+// the on-time performance for the entire company and then each individual ... such that
+// each person's completion rate and on-time performance can be seen in one go."
+// Both come off the same kart_summary row, so this is one query, not two:
+//   Completion % = (ontime + late)   / assigned   - did the duty happen at all
+//   On-Time %    = (ontime + late/2) / assigned   - did it happen by its due date
+// The GAP between the two columns is the cost of lateness; showing them adjacent is the
+// whole point of the screen. This replaced two near-identical tabs (Completion and
+// On-Time Performance) that differed only in that one fraction.
 // Counts combine one-off tasks with checklist occurrences; amnestied occurrences are
-// excluded (they were written off). The four buckets are mutually exclusive and add
-// up to Assigned, so Overdue means past its date and never ticked, which includes
-// daily items that lapsed.
-async function summaryScreen(mode){
+// excluded (they were written off). The buckets are mutually exclusive and add up to
+// Assigned, so Overdue means past its date and never ticked - which includes daily
+// items that lapsed to 'missed'.
+async function summaryScreen(){
   const from=OV_FROM, to=OV_TO||today();
-  view(`${topbar(mode==='ontime'?'On-Time Performance':'Completion',`${fmt(from)} to ${fmt(to)}`,'')}
+  view(`${topbar('Performance',`${fmt(from)} to ${fmt(to)}`,'')}
         <div class="panel"><p style="color:var(--muted);padding:20px">Loading…</p></div>`);
   const {data,error}=await sb.rpc('kart_summary',{p_from:from,p_to:to});
   if(error){ toast(error.message); }
   const people=(data||[]).map(r=>({name:r.full_name,assigned:+r.assigned,ontime:+r.ontime,
                                    late:+r.late,pending:+r.pending,overdue:+r.overdue,
-                                   odays:+(r.overdue_days||0)}));
+                                   odays:+(r.overdue_days||0)}))
+                         .sort((a,b)=>b.assigned-a.assigned||a.name.localeCompare(b.name));
   const T=people.reduce((s,r)=>({assigned:s.assigned+r.assigned,ontime:s.ontime+r.ontime,late:s.late+r.late,
                                  pending:s.pending+r.pending,overdue:s.overdue+r.overdue,
                                  odays:s.odays+r.odays}),
                         {assigned:0,ontime:0,late:0,pending:0,overdue:0,odays:0});
-  const score = r => !r.assigned ? null
-      : Math.round(100*(mode==='ontime' ? r.ontime + r.late/2 : r.ontime + r.late)/r.assigned);
-  const done = r => r.ontime + r.late;
+  const done     = r => r.ontime + r.late;
+  const compPct  = r => r.assigned ? Math.round(100*(r.ontime + r.late)/r.assigned)   : null;
+  const timePct  = r => r.assigned ? Math.round(100*(r.ontime + r.late/2)/r.assigned) : null;
   const avgDelay = T.overdue ? Math.round(T.odays / T.overdue) : 0;
+  const tone     = p => p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
+  const bar      = p => `<div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;height:8px;background:#eef2f0;border-radius:5px;overflow:hidden">
+        <div style="width:${p||0}%;height:100%;background:${tone(p)}"></div></div>
+      <span style="font-size:12px;min-width:34px;text-align:right;font-weight:600">${p===null?'-':p+'%'}</span></div>`;
 
-  const TITLE = mode==='ontime' ? 'On-Time Performance' : 'Completion';
-  const SUB   = mode==='ontime'
-        ? 'Ticked by its due date counts full · ticked late counts half'
-        : 'Every duty completed, whether it was on time or late';
-  const COL   = mode==='ontime' ? 'On-Time %' : 'Completion %';
-  const TAB   = 'progress';
-
-  view(`${topbar(TITLE,`${fmt(from)} to ${fmt(to)} · ${SUB}`,
-      `<button class="btn ghost" onclick="go('${TAB}')">⟳ Refresh</button>`)}
+  view(`${topbar('Performance',`${fmt(from)} to ${fmt(to)} · completion and on-time, side by side`,
+      `<button class="btn ghost" onclick="go('progress')">⟳ Refresh</button>`)}
     <div class="panel" style="margin-bottom:14px">
       <div class="ph" style="gap:10px;flex-wrap:wrap">
         <h2 style="margin-right:auto">Date range</h2>
@@ -279,48 +282,45 @@ async function summaryScreen(mode){
           <input type="date" id="ov-from" value="${from}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
         <label style="font-size:13px;color:var(--muted)">To
           <input type="date" id="ov-to" value="${to}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
-        <button class="btn green" onclick="ovApply('${TAB}')">Apply</button>
-        <button class="btn ghost" onclick="ovPreset('2026-04-01','${TAB}')">FY to date</button>
-        <button class="btn ghost" onclick="ovPreset(monthStart(),'${TAB}')">This month</button>
+        <button class="btn green" onclick="ovApply('progress')">Apply</button>
+        <button class="btn ghost" onclick="ovPreset('2026-04-01','progress')">FY to date</button>
+        <button class="btn ghost" onclick="ovPreset(monthStart(),'progress')">This month</button>
       </div>
     </div>
+
     <div class="kpis">
-      ${kpi('Total Tasks Assigned',T.assigned,'')}
-      ${kpi('Total Tasks Completed',done(T),'green')}
-      ${kpi('Total Tasks Pending',T.pending,'blue')}
-      ${kpi('Total Tasks Overdue',T.overdue,'red')}
-      ${mode==='ontime' ? kpi('Average Delay', avgDelay+(avgDelay===1?' day':' days'),'amber') : ''}
+      ${kpi('Company Completion',(compPct(T)===null?'-':compPct(T)+'%'),'green')}
+      ${kpi('Company On-Time',(timePct(T)===null?'-':timePct(T)+'%'),'blue')}
+      ${kpi('Total Overdue',T.overdue,'red')}
+      ${kpi('Average Delay',avgDelay+(avgDelay===1?' day':' days'),'amber')}
     </div>
+
     <div class="panel">
-      <div class="ph"><h2>By employee</h2>
+      <div class="ph"><h2>Every employee, both measures</h2>
         <span style="color:var(--muted);font-size:12px;margin-right:auto">&nbsp;${people.filter(r=>r.assigned).length} people with duties in this range</span>
       </div>
       <table><thead><tr><th>Name</th><th class="num">Assigned</th><th class="num">Completed</th>
-        <th class="num">Pending</th><th class="num">Overdue</th><th>${COL}</th></tr></thead><tbody>
-      ${people.map(r=>{
-        const p=score(r), c=p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
-        return `<tr${r.assigned?'':' style="opacity:.45"'}>
+        <th class="num">Pending</th><th class="num">Overdue</th>
+        <th style="min-width:150px">Completion %</th><th style="min-width:150px">On-Time %</th></tr></thead><tbody>
+      ${people.map(r=>`<tr${r.assigned?'':' style="opacity:.45"'}>
           <td>${esc(r.name)}</td>
           <td class="num">${r.assigned}</td>
           <td class="num">${done(r)}</td>
           <td class="num">${r.pending}</td>
           <td class="num"${r.overdue?' style="color:var(--red);font-weight:700"':''}>${r.overdue}</td>
-          <td><div style="display:flex;align-items:center;gap:8px">
-            <div style="flex:1;height:8px;background:#eef2f0;border-radius:5px;overflow:hidden">
-              <div style="width:${p||0}%;height:100%;background:${c}"></div></div>
-            <span style="font-size:12px;min-width:34px;text-align:right">${p===null?'-':p+'%'}</span></div></td></tr>`;
-      }).join('')}
+          <td>${bar(compPct(r))}</td>
+          <td>${bar(timePct(r))}</td></tr>`).join('')}
       </tbody>
-      <tfoot><tr class="total"><td>All employees</td><td class="num">${T.assigned}</td><td class="num">${done(T)}</td>
+      <tfoot><tr class="total"><td>Whole company</td><td class="num">${T.assigned}</td><td class="num">${done(T)}</td>
         <td class="num">${T.pending}</td><td class="num">${T.overdue}</td>
-        <td>${score(T)===null?'-':score(T)+'%'}</td></tr></tfoot></table>
+        <td>${compPct(T)===null?'-':compPct(T)+'%'}</td>
+        <td>${timePct(T)===null?'-':timePct(T)+'%'}</td></tr></tfoot></table>
       <p style="color:var(--muted);font-size:12px;margin-top:10px">
-        ${mode==='ontime'
-          ? 'A duty ticked by its due date scores 1, ticked late scores 0.5, never ticked scores 0.'
-          : 'A duty counts as completed whether it was ticked on time or late.'}
-        Written-off (amnestied) occurrences are excluded.</p>
+        <b>Completion</b> counts a duty whether it was ticked on time or late. <b>On-Time</b> gives a full point
+        only if it was ticked by its due date, and half a point if it was late — so the gap between the two
+        columns is how much of the work happened, but happened late. Written-off (amnestied) occurrences are excluded.</p>
     </div>
-    ${mode==='ontime' ? `
+
     <div class="grid2" style="margin-top:14px">
       <div class="panel"><div class="ph"><h2>Who is carrying the backlog</h2></div>
         <div style="height:260px"><canvas id="ch-emp"></canvas></div>
@@ -328,8 +328,8 @@ async function summaryScreen(mode){
       <div class="panel"><div class="ph"><h2>Where everything stands</h2></div>
         <div style="height:260px"><canvas id="ch-status"></canvas></div>
         <p style="color:var(--muted);font-size:12px;margin-top:8px">Every item due in this date range.</p></div>
-    </div>` : ''}`);
-  if(mode==='ontime') drawSummaryCharts(people, T);
+    </div>`);
+  drawSummaryCharts(people, T);
 }
 
 // ---- screens ----
@@ -342,39 +342,11 @@ const render={
     // Same three buckets as My Pending Tasks, so the two screens agree:
     //   due today · overdue (carried forward) · missed in the last 14 days (still tickable)
     const t=today(), cutoff=addDays(t,-14);
-    const [tasks,marks,summary]=await Promise.all([
+    const [tasks,marks]=await Promise.all([
       q('v_tasks', x=>x.eq('status','OPEN')),
       qAll('v_checklist_marks', x=>x.in('status',['pending','overdue','missed'])
-             .gte('due_date',cutoff).lte('due_date',t).order('due_date')),
-      sb.rpc('kart_summary',{p_from:OV_FROM,p_to:OV_TO||t})
+             .gte('due_date',cutoff).lte('due_date',t).order('due_date'))
     ]);
-    // Completion, folded in from the old Completion tab (14-Sep-2026). Same kart_summary
-    // RPC that feeds On-Time Performance; the difference is only that a late tick counts
-    // in full here and half there. Date-ranged, unlike the live lists above.
-    const comp=(summary&&summary.data||[]).map(r=>({name:r.full_name,assigned:+r.assigned,
-                  done:+r.ontime + +r.late, pending:+r.pending, overdue:+r.overdue}))
-                .sort((a,b)=>b.assigned-a.assigned);
-    const CT=comp.reduce((s,r)=>({assigned:s.assigned+r.assigned,done:s.done+r.done,
-                  pending:s.pending+r.pending,overdue:s.overdue+r.overdue}),
-                  {assigned:0,done:0,pending:0,overdue:0});
-    const cpct=r=>r.assigned?Math.round(100*r.done/r.assigned):null;
-
-    PEND={};
-    const bucket=m => m.status==='missed' ? 'missed'
-                    : (m.status==='overdue' || m.due_date<t) ? 'overdue' : 'today';
-    const slot=(email,name)=>PEND[email]||(PEND[email]={name,email,items:[],today:0,overdue:0,missed:0});
-    marks.forEach(m=>{
-      const e=slot(m.assignee_email||'?', m.assignee_name);
-      const b=bucket(m); e[b]++;
-      e.items.push({kind:'duty', id:m.id, title:m.title, freq:m.frequency, due:m.due_date, bucket:b});
-    });
-    tasks.forEach(x=>{
-      const e=slot(x.assignee_email||'?', x.assignee_name);
-      const b=x.due_current<t?'overdue':'today'; e[b]++;
-      e.items.push({kind:'task', id:x.id, title:x.title, freq:'—', due:x.due_current,
-                    bucket:b, task_no:x.task_no});
-    });
-
     const emps=Object.values(PEND)
       .sort((a,b)=>(b.overdue+b.missed)-(a.overdue+a.missed) || b.items.length-a.items.length
                  || (a.name||'').localeCompare(b.name||''));
@@ -395,7 +367,7 @@ const render={
       </div>`;
     }).join('') || '<p style="color:var(--muted)">Nothing outstanding anywhere. ✓</p>';
 
-    view(`${topbar('Team Tasks','Everything outstanding across the team — select a person to see their list','')}
+    view(`${topbar('Task Reminder','Everything outstanding across the team — select a person, then nudge them','')}
       <div class="kpis">
         ${kpi('Due today',T.today,'blue')}
         ${kpi('Overdue',T.overdue,'red')}
@@ -410,36 +382,7 @@ const render={
         <div class="panel" id="emp-detail"><p style="color:var(--muted);text-align:center;padding:40px">Select an employee to view their outstanding duties</p></div>
       </div>
 
-      <div class="panel" style="margin-top:14px">
-        <div class="ph" style="gap:10px;flex-wrap:wrap">
-          <h2 style="margin-right:auto">Completion — ${fmt(OV_FROM)} to ${fmt(OV_TO||t)}</h2>
-          <label style="font-size:13px;color:var(--muted)">From
-            <input type="date" id="ov-from" value="${OV_FROM}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
-          <label style="font-size:13px;color:var(--muted)">To
-            <input type="date" id="ov-to" value="${OV_TO||t}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
-          <button class="btn green" onclick="ovApply('pending')">Apply</button>
-          <button class="btn ghost" onclick="ovPreset('2026-04-01','pending')">FY to date</button>
-          <button class="btn ghost" onclick="ovPreset(monthStart(),'pending')">This month</button>
-        </div>
-        <table><thead><tr><th>Name</th><th class="num">Assigned</th><th class="num">Completed</th>
-          <th class="num">Pending</th><th class="num">Overdue</th><th>Completion %</th></tr></thead><tbody>
-        ${comp.map(r=>{ const p=cpct(r), c=p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
-          return `<tr><td>${esc(r.name)}</td><td class="num">${r.assigned}</td><td class="num">${r.done}</td>
-            <td class="num">${r.pending}</td>
-            <td class="num"${r.overdue?' style="color:var(--red);font-weight:700"':''}>${r.overdue}</td>
-            <td><div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:8px;background:#eef2f0;border-radius:5px;overflow:hidden">
-                <div style="width:${p||0}%;height:100%;background:${c}"></div></div>
-              <span style="font-size:12px;min-width:34px;text-align:right">${p===null?'-':p+'%'}</span></div></td></tr>`;
-        }).join('')}
-        </tbody>
-        <tfoot><tr class="total"><td>All employees</td><td class="num">${CT.assigned}</td><td class="num">${CT.done}</td>
-          <td class="num">${CT.pending}</td><td class="num">${CT.overdue}</td>
-          <td>${cpct(CT)===null?'-':cpct(CT)+'%'}</td></tr></tfoot></table>
-        <p style="color:var(--muted);font-size:12px;margin-top:10px">
-          A duty counts as completed whether it was ticked on time or late. For the stricter view that
-          half-credits a late tick, see On-Time Performance. Written-off (amnestied) occurrences are excluded.</p>
-      </div>`);
+`);
   },
   async mytasks(){
     // Team feedback 04-Sep-2026: this screen only ever showed items due TODAY, and in
@@ -538,7 +481,7 @@ const render={
       </div>`);
     dutyRender();
   },
-  async progress(){ await summaryScreen('ontime'); },
+  async progress(){ await summaryScreen(); },
   async checklists(){
     const admin=isAdmin();
     const cs=await q('v_checklists', x=>x.eq('active',true).order('assignee_name').order('frequency'));
@@ -581,7 +524,7 @@ const render={
       </div>`);
   },
   async assign(){
-    view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'pending\')">← Back to Team Tasks</button>')}
+    view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'pending\')">← Back to Task Reminder</button>')}
       <div class="panel">
         <div class="ph"><h2>📋 Task Assignment Form</h2></div>
         <label class="lb">Employee</label>
@@ -603,7 +546,7 @@ function gaugeCard(r){
     <div style="font-weight:700">${esc(r.full_name)}</div>
     <div style="font-size:12px;color:var(--muted)">${r.tasks_due?`tasks ${r.task_score??'—'}% of ${r.tasks_due} · `:''}checklist ${r.checklist_score??'—'}% of ${r.checklist_due}</div></div>`;
 }
-// Charts for the merged On-Time Performance screen. Driven by the kart_summary rows
+// Charts for the Performance screen. Driven by the kart_summary rows
 // the screen already has, NOT by raw v_tasks/v_checklist_marks. The old Dashboard
 // pulled every row into the browser to draw these; that is the same pattern that made
 // the first Completion screen time out. Doing it from the aggregate is instant and
