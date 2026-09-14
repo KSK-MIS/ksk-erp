@@ -442,8 +442,8 @@ const render={
 
     // Everything still to fall due before the month is out, any frequency. kart.sweep
     // always advances next_due past today, so these are genuinely upcoming, not backlog.
-    const thisMonth = cls.filter(c=>c.next_due<=mEnd)
-                         .sort((a,b)=>a.next_due.localeCompare(b.next_due)||a.title.localeCompare(b.title));
+    const thisMonth = cls.filter(c=>dueOn(c)<=mEnd)
+                         .sort((a,b)=>dueOn(a).localeCompare(dueOn(b))||a.title.localeCompare(b.title));
     MY_CLS=cls; MY_FREQ='';
 
     view(`${topbar('My Pending Tasks',`${esc(ME.full_name)} — everything on your plate`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
@@ -474,7 +474,7 @@ const render={
         <span style="color:var(--muted);font-size:12px">Everything still to fall due before ${fmt(mEnd)}, any frequency</span></div>
         ${thisMonth.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th></tr></thead><tbody>
           ${thisMonth.map(c=>`<tr><td>${esc(c.title)}</td><td>${FREQ[c.frequency]||c.frequency}</td>
-            <td>${dayName(c.next_due)} ${fmt(c.next_due)}</td></tr>`).join('')}
+            <td>${dayName(dueOn(c))} ${fmt(dueOn(c))}</td></tr>`).join('')}
           </tbody></table>`
           :'<p style="color:var(--muted)">Nothing further falls due this month.</p>'}
       </div>
@@ -529,7 +529,7 @@ const render={
       <div class="panel">${picker}
         <div class="ph" style="margin-top:12px"><h2>${admin?(picked?esc(picked)+' — duties':'All duties'):'My duties'} (${roster.length})</h2></div>
         ${roster.length?`<table><thead><tr><th>Duty</th>${admin?'<th>Assignee</th>':''}<th>Frequency</th><th>On miss</th><th>Next due</th>${admin?'<th></th>':''}</tr></thead><tbody>`+
-          roster.map(c=>`<tr><td>${esc(c.title)}</td>${admin?`<td>${esc(c.assignee_name)}</td>`:''}<td>${FREQ[c.frequency]||c.frequency}</td><td>${c.on_miss}</td><td>${fmt(c.next_due)}</td>${admin?`<td><button class="btn" onclick="doRetire('${c.id}')">Retire</button></td>`:''}</tr>`).join('')+`</tbody></table>`
+          roster.map(c=>`<tr><td>${esc(c.title)}</td>${admin?`<td>${esc(c.assignee_name)}</td>`:''}<td>${FREQ[c.frequency]||c.frequency}</td><td>${c.on_miss}</td><td>${fmt(dueOn(c))}</td>${admin?`<td><button class="btn" onclick="doRetire('${c.id}')">Retire</button></td>`:''}</tr>`).join('')+`</tbody></table>`
           :`<p style="color:var(--muted)">${admin&&CHK_FILTER
               ? esc(picked||'This person')+' has no recurring duties yet — use ＋ Add Duty to create one.'
               : 'No duties.'}</p>`}
@@ -602,8 +602,8 @@ function dutyRender(){
   });
   const t=today(), ORDER=['D','W','M','Q','H','Y'];
   const table=list=>`<table><thead><tr><th>Duty</th><th>Next due</th></tr></thead><tbody>${
-    list.map(c=>`<tr><td>${esc(c.title)}</td><td>${dayName(c.next_due)} ${fmt(c.next_due)}${
-      c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}</tbody></table>`;
+    list.map(c=>`<tr><td>${esc(c.title)}</td><td>${dayName(dueOn(c))} ${fmt(dueOn(c))}${
+      dueOn(c)<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}</tbody></table>`;
   if(!MY_FREQ){
     box.innerHTML='<p style="color:var(--muted);padding:6px 0">Pick a frequency above to list those duties, or Show All.</p>';
     return;
@@ -622,6 +622,12 @@ function dutyRender(){
 }
 
 // ---- overview / pending helpers ----
+// The DB decides the Sunday rule (kart.due_working) and v_checklists exposes it as
+// next_due_working. dueOn() just reads that, falling back to the raw anchor if an older
+// view is ever in play. Screens must show the day people should ACT, not the anchor:
+// a non-daily duty landing on a Sunday is worked the Saturday before.
+const dueOn = c => c.next_due_working || c.next_due;
+
 function dayName(iso){ return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(iso+'T00:00:00').getDay()]; }
 function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
