@@ -106,7 +106,7 @@
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 
-let ME=null, USERS=[], TAB='pending', CHK_FILTER='', ASSIGN_ROWS=0;
+let ME=null, USERS=[], TAB='mytasks', CHK_FILTER='', ASSIGN_ROWS=0;
 let OV_TASKS=[], PEND={}, CHARTS=[], MY_CLS=[], MY_FREQ='', BADGE={pending:0,mytasks:0,checklists:0};
 let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
@@ -190,7 +190,7 @@ function drawNav(){
   }).join('');
 }
 function go(t){ if(NAV.find(n=>n.id===t&&n.admin)&&!isAdmin()) t='mytasks';
-  TAB=t; drawNav(); (render[t]||render[isAdmin()?'pending':'mytasks'])(); }
+  TAB=t; drawNav(); (render[t]||render['mytasks'])(); }
 
 function topbar(title,sub,right){
   return `<div class="topbar">
@@ -445,29 +445,30 @@ const render={
     // Team feedback 04-Sep-2026: this screen only ever showed items due TODAY, and in
     // practice only Daily ones. Two causes, both fixed:
     //  1. it filtered status in ('pending','overdue'). A Daily duty that lapses becomes
-    //     'missed', so yesterday's undone work silently vanished. A "Missed in the last
-    //     14 days" panel was added to surface them; Prateek had it removed 14-Sep-2026,
-    //     so lapsed dailies are once again invisible here (by choice, not by accident).
+    //     'missed', so yesterday's undone work silently vanished. The "Missed in the
+    //     last 14 days" panel surfaces them and they stay TICKABLE - checklist_mark()
+    //     accepts a missed mark and records it done_late. Briefly removed 14-Sep-2026
+    //     and restored the same day: everyone must be able to act on their own misses.
     //  2. it filtered due_date <= today, so a Weekly/Monthly+ duty was invisible until
     //     its date arrived - and the sweep does not create the occurrence until then.
     //     The duty sections below read kart.checklists directly.
     // Restructured 14-Sep-2026 on Prateek's instructions: open tasks first, KPI tiles
     // dropped (they looked clickable but were not), the 7-day look-ahead replaced by
     // "Due This Month", and the full duty list put behind a frequency picker.
-    // 'missed' is deliberately NOT fetched any more - the Missed panel was removed
-    // 14-Sep-2026 on Prateek's instruction. NOTE this also means a lapsed Daily duty can
-    // no longer be ticked from this screen; see the note in the project memory.
-    // The old query also had a 14-day floor on due_date, which would have hidden any
-    // carried-forward item older than a fortnight. Nothing was being hidden in practice
-    // (every 'overdue' row currently falls inside 14 days) but the floor is gone now, so
-    // an old carry-forward can never silently vanish.
-    const t=today(), mEnd=monthEnd();
-    const [ts,ms,cls]=await Promise.all([
+    // Live work and missed work are fetched SEPARATELY on purpose. Pending/overdue carry
+    // no lower date bound, so an old carried-forward item can never silently vanish;
+    // missed is windowed to 14 days because a lapsed Daily would otherwise pile up
+    // forever. Folding them into one query would put the 14-day floor back on overdue.
+    const t=today(), cutoff=addDays(t,-14), mEnd=monthEnd();
+    const [ts,ms,msMissed,cls]=await Promise.all([
       q('v_tasks', x=>x.eq('assignee_email',ME.email).eq('status','OPEN').order('due_current')),
       q('v_checklist_marks', x=>x.eq('assignee_email',ME.email)
             .in('status',['pending','overdue']).lte('due_date',t).order('due_date')),
+      q('v_checklist_marks', x=>x.eq('assignee_email',ME.email)
+            .eq('status','missed').gte('due_date',cutoff).lte('due_date',t).order('due_date')),
       q('v_checklists', x=>x.eq('assignee_email',ME.email).eq('active',true).order('next_due'))
     ]);
+    const missed = msMissed.slice().sort((a,b)=>b.due_date.localeCompare(a.due_date));
     const dueToday = ms.filter(m=>m.status==='pending' && m.due_date===t);
     const overdue  = ms.filter(m=>m.status==='overdue' || (m.status==='pending' && m.due_date<t));
     const openTasks= ts;
@@ -476,6 +477,7 @@ const render={
       <td>${fmt(m.due_date)}${extra||''}</td>
       <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`;
     // rows arrives as an array; interpolating one directly joins it with commas
+    const MISS_SHOWN=20;
     const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
 
     // Everything still to fall due before the month is out, any frequency. kart.sweep
@@ -528,7 +530,12 @@ const render={
         <div id="duty-body"></div>
       </div>
 
-`);
+      <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
+        <span style="color:var(--muted);font-size:12px">A Daily duty lapses when its day passes — tick it here and it records as done, late</span></div>
+        ${missed.length?tbl(missed.slice(0,MISS_SHOWN).map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
+            +(missed.length>MISS_SHOWN?`<p style="color:var(--muted);font-size:12px;margin-top:8px">Showing the most recent ${MISS_SHOWN} of ${missed.length}.</p>`:'')
+          :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
+      </div>`);
     dutyRender();
   },
   async progress(){ await summaryScreen('ontime'); },
@@ -729,7 +736,7 @@ async function refreshBadges(){
   USERS=await q('v_users', x=>x.order('full_name'));
   document.title = possessive(ME.full_name)+' Task List · KSK ERP';
   await refreshBadges();
-  drawShell(); go(isAdmin()?'pending':'mytasks');
+  drawShell(); go('mytasks');   // everyone lands on their own list, admins included
 })();
 </script>
 <script>
