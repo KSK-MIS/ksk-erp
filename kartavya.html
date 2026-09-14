@@ -107,7 +107,7 @@ const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 
 let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
-let OV_TASKS=[], PEND={}, BADGE={pending:0,mytasks:0,checklists:0};
+let OV_TASKS=[], PEND={}, CHARTS=[], BADGE={pending:0,mytasks:0,checklists:0};
 let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
   'ea@kskenggind.com':'916290154899',
@@ -158,9 +158,7 @@ const NAV=[
   {id:'pending',   label:'Team Tasks',      icon:'⚠️', admin:true},
   {id:'mytasks',   label:'My Pending Tasks',icon:'🗒️', admin:false},
   {id:'progress',  label:'On-Time Performance',icon:'🎯', admin:true},
-  {id:'dash',      label:'Dashboard',       icon:'📈', admin:true},
   {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
-  {id:'capture',   label:'Capture',         icon:'🔒', admin:false},
   {id:'assign',    label:'Assign Task',     icon:'➕', admin:true},
 ];
 function drawShell(){
@@ -255,13 +253,16 @@ async function summaryScreen(mode){
   const {data,error}=await sb.rpc('kart_summary',{p_from:from,p_to:to});
   if(error){ toast(error.message); }
   const people=(data||[]).map(r=>({name:r.full_name,assigned:+r.assigned,ontime:+r.ontime,
-                                   late:+r.late,pending:+r.pending,overdue:+r.overdue}));
+                                   late:+r.late,pending:+r.pending,overdue:+r.overdue,
+                                   odays:+(r.overdue_days||0)}));
   const T=people.reduce((s,r)=>({assigned:s.assigned+r.assigned,ontime:s.ontime+r.ontime,late:s.late+r.late,
-                                 pending:s.pending+r.pending,overdue:s.overdue+r.overdue}),
-                        {assigned:0,ontime:0,late:0,pending:0,overdue:0});
+                                 pending:s.pending+r.pending,overdue:s.overdue+r.overdue,
+                                 odays:s.odays+r.odays}),
+                        {assigned:0,ontime:0,late:0,pending:0,overdue:0,odays:0});
   const score = r => !r.assigned ? null
       : Math.round(100*(mode==='ontime' ? r.ontime + r.late/2 : r.ontime + r.late)/r.assigned);
   const done = r => r.ontime + r.late;
+  const avgDelay = T.overdue ? Math.round(T.odays / T.overdue) : 0;
 
   const TITLE = mode==='ontime' ? 'On-Time Performance' : 'Completion';
   const SUB   = mode==='ontime'
@@ -289,6 +290,7 @@ async function summaryScreen(mode){
       ${kpi('Total Tasks Completed',done(T),'green')}
       ${kpi('Total Tasks Pending',T.pending,'blue')}
       ${kpi('Total Tasks Overdue',T.overdue,'red')}
+      ${mode==='ontime' ? kpi('Average Delay', avgDelay+(avgDelay===1?' day':' days'),'amber') : ''}
     </div>
     <div class="panel">
       <div class="ph"><h2>By employee</h2>
@@ -318,7 +320,17 @@ async function summaryScreen(mode){
           ? 'A duty ticked by its due date scores 1, ticked late scores 0.5, never ticked scores 0.'
           : 'A duty counts as completed whether it was ticked on time or late.'}
         Written-off (amnestied) occurrences are excluded.</p>
-    </div>`);
+    </div>
+    ${mode==='ontime' ? `
+    <div class="grid2" style="margin-top:14px">
+      <div class="panel"><div class="ph"><h2>Who is carrying the backlog</h2></div>
+        <div style="height:260px"><canvas id="ch-emp"></canvas></div>
+        <p style="color:var(--muted);font-size:12px;margin-top:8px">Outstanding items only, worst 12 first.</p></div>
+      <div class="panel"><div class="ph"><h2>Where everything stands</h2></div>
+        <div style="height:260px"><canvas id="ch-status"></canvas></div>
+        <p style="color:var(--muted);font-size:12px;margin-top:8px">Every item due in this date range.</p></div>
+    </div>` : ''}`);
+  if(mode==='ontime') drawSummaryCharts(people, T);
 }
 
 // ---- screens ----
@@ -479,27 +491,6 @@ const render={
       </div>`);
   },
   async progress(){ await summaryScreen('ontime'); },
-  async dash(){
-    const [tasks,marks]=await Promise.all([q('v_tasks'),q('v_checklist_marks')]);
-    const t=today();
-    const done=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE').length+marks.filter(m=>m.status==='done'||m.status==='done_late').length;
-    const overdue=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t).length+marks.filter(m=>m.status==='missed'||m.status==='overdue').length;
-    const compRate=(done+overdue)?Math.round(done/(done+overdue)*100):0;
-    const od=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t);
-    const avgDelay=od.length?Math.round(od.reduce((s,x)=>s+Math.max(0,(new Date(t)-new Date(x.due_current))/864e5),0)/od.length):0;
-    const active=new Set([...tasks.filter(x=>x.status==='OPEN').map(x=>x.assignee_email),...marks.filter(m=>['pending','overdue','missed'].includes(m.status)).map(m=>m.assignee_email)]).size;
-    view(`${topbar('Dashboard','Analytics & Performance Metrics','<button class="btn ghost" onclick="go(\'dash\')">⟳ Refresh Data</button>')}
-      <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
-        ${kpi('Completion Rate',compRate+'%','')}
-        ${kpi('Average Delay',avgDelay+' days','amber')}
-        ${kpi('Active Employees',active,'blue')}
-      </div>
-      <div class="grid2">
-        <div class="panel"><div class="ph"><h2>📊 Employee-wise Load</h2></div><canvas id="ch-emp" height="230"></canvas></div>
-        <div class="panel"><div class="ph"><h2>🥧 Status Breakdown</h2></div><canvas id="ch-status" height="230"></canvas></div>
-      </div>`);
-    drawCharts(tasks,marks,t);
-  },
   async checklists(){
     const admin=isAdmin();
     const cs=await q('v_checklists', x=>x.eq('active',true).order('assignee_name').order('frequency'));
@@ -530,18 +521,6 @@ const render={
           :'<p style="color:var(--muted)">Nothing yet.</p>'}
       </div>`);
   },
-  async capture(){
-    const cs=await q('v_capture', x=>x.in('status',['INBOX','SOMEDAY']).order('created_at',{ascending:false}));
-    view(`${topbar('Capture','Private to you. 🔒','')}
-      <div class="panel"><label class="lb">New note</label>
-        <textarea id="cp" class="inp" rows="2" placeholder="Anything on your mind…"></textarea>
-        <button class="btn green" style="margin-top:10px" onclick="doCap()">＋ Capture</button></div>
-      ${cs.map(c=>`<div class="panel" style="padding:14px"><div>${esc(c.content)}</div>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" onclick="capTask('${c.id}')">→ Task</button>
-          ${c.status!=='SOMEDAY'?`<button class="btn" onclick="capSet('${c.id}','SOMEDAY')">Someday</button>`:'<span class="pill open">SOMEDAY</span>'}
-          <button class="btn" onclick="capSet('${c.id}','DROPPED')">Drop</button></div></div>`).join('')||'<p style="color:var(--muted)">Nothing captured.</p>'}`);
-  },
   async assign(){
     view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'overview\')">← Back to Overview</button>')}
       <div class="panel">
@@ -565,18 +544,31 @@ function gaugeCard(r){
     <div style="font-weight:700">${esc(r.full_name)}</div>
     <div style="font-size:12px;color:var(--muted)">${r.tasks_due?`tasks ${r.task_score??'—'}% of ${r.tasks_due} · `:''}checklist ${r.checklist_score??'—'}% of ${r.checklist_due}</div></div>`;
 }
-function drawCharts(tasks,marks,t){
+// Charts for the merged On-Time Performance screen. Driven by the kart_summary rows
+// the screen already has, NOT by raw v_tasks/v_checklist_marks. The old Dashboard
+// pulled every row into the browser to draw these; that is the same pattern that made
+// the first Completion screen time out. Doing it from the aggregate is instant and
+// makes the charts obey the date range, which the old Dashboard ignored.
+function drawSummaryCharts(people, T){
   if(typeof Chart==='undefined'){ toast('Charts library not loaded'); return; }
-  const load={};
-  tasks.filter(x=>x.status==='OPEN').forEach(x=>load[x.assignee_name]=(load[x.assignee_name]||0)+1);
-  marks.filter(m=>['pending','overdue','missed'].includes(m.status)).forEach(m=>load[m.assignee_name]=(load[m.assignee_name]||0)+1);
-  const ent=Object.entries(load).sort((a,b)=>b[1]-a[1]).slice(0,12);
-  new Chart($('#ch-emp'),{type:'bar',data:{labels:ent.map(e=>e[0]),datasets:[{data:ent.map(e=>e[1]),backgroundColor:'#12395f',borderRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:9},maxRotation:60,minRotation:40}}}}});
-  const done=tasks.filter(x=>x.status==='DONE'||x.status==='DONE_LATE').length+marks.filter(m=>m.status==='done'||m.status==='done_late').length;
-  const pend=tasks.filter(x=>x.status==='OPEN'&&x.due_current>=t).length+marks.filter(m=>m.status==='pending').length;
-  const over=tasks.filter(x=>x.status==='OPEN'&&x.due_current<t).length+marks.filter(m=>m.status==='overdue').length;
-  const miss=marks.filter(m=>m.status==='missed').length;
-  new Chart($('#ch-status'),{type:'doughnut',data:{labels:['Completed','Pending','Overdue','Missed'],datasets:[{data:[done,pend,over,miss],backgroundColor:['#15803d','#175cd3','#c9a227','#b42318']}]},options:{plugins:{legend:{position:'bottom'}}}});
+  CHARTS.forEach(c=>{ try{ c.destroy(); }catch(e){} }); CHARTS=[];
+
+  const load=people.filter(r=>r.pending+r.overdue>0)
+                   .sort((a,b)=>(b.pending+b.overdue)-(a.pending+a.overdue)).slice(0,12);
+  const el1=$('#ch-emp');
+  if(el1) CHARTS.push(new Chart(el1,{type:'bar',
+    data:{labels:load.map(r=>firstName(r.name)),
+          datasets:[{label:'Overdue',data:load.map(r=>r.overdue),backgroundColor:'#b42318',borderRadius:4},
+                    {label:'Still to do',data:load.map(r=>r.pending),backgroundColor:'#175cd3',borderRadius:4}]},
+    options:{plugins:{legend:{position:'bottom'}},responsive:true,maintainAspectRatio:false,
+             scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,beginAtZero:true}}}}));
+
+  const el2=$('#ch-status');
+  if(el2) CHARTS.push(new Chart(el2,{type:'doughnut',
+    data:{labels:['On time','Late','Still to do','Overdue'],
+          datasets:[{data:[T.ontime,T.late,T.pending,T.overdue],
+                     backgroundColor:['#15803d','#c9a227','#175cd3','#b42318']}]},
+    options:{plugins:{legend:{position:'bottom'}},responsive:true,maintainAspectRatio:false}}));
 }
 
 // ---- overview / pending helpers ----
@@ -645,14 +637,6 @@ async function ckCreate(){ const t=$('#ck-title').value; if(!t.trim())return toa
   await rpc('checklist_create',{p_title:t,p_assignee_email:$('#ck-who').value,p_freq:$('#ck-freq').value,p_on_miss:$('#ck-miss').value});
   await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); closeDlg(); CHK_FILTER=''; render.checklists(); }
 function setChkFilter(v){ CHK_FILTER=v; render.checklists(); }
-async function doCap(){ const v=$('#cp').value; if(!v.trim())return; await rpc('capture_add',{p_content:v}); render.capture(); }
-async function capSet(id,s){ await rpc('capture_set',{p_id:id,p_status:s}); render.capture(); }
-function capTask(id){ dlg(`<div class="ph"><h2>Capture → Task</h2></div>
-  <label class="lb">Assign to</label><select id="ct-who" class="inp">${USERS.map(u=>`<option value="${esc(u.email)}" ${u.email===ME.email?'selected':''}>${esc(u.full_name)}</option>`).join('')}</select>
-  <label class="lb">Due</label><input id="ct-d" type="date" class="inp" value="${today()}">
-  <div style="margin-top:14px;display:flex;gap:8px"><button class="btn green" onclick="capTaskGo('${id}')">Create task</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`); }
-async function capTaskGo(id){ const w=$('#ct-who').value,d=$('#ct-d').value; const n=await rpc('capture_to_task',{p_id:id,p_assignee_email:w,p_due:d}); toast('Created '+n); closeDlg(); render.capture(); }
-
 async function refreshBadges(){
   const ts=await q('v_tasks', x=>x.eq('status','OPEN'));
   BADGE.pending=ts.length;
