@@ -107,7 +107,7 @@ const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 
 let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
-let OV_TASKS=[], PEND={}, CHARTS=[], BADGE={pending:0,mytasks:0,checklists:0};
+let OV_TASKS=[], PEND={}, CHARTS=[], MY_CLS=[], MY_FREQ='', BADGE={pending:0,mytasks:0,checklists:0};
 let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
   'ea@kskenggind.com':'916290154899',
@@ -403,15 +403,17 @@ const render={
   },
   async mytasks(){
     // Team feedback 04-Sep-2026: this screen only ever showed items due TODAY, and in
-    // practice only Daily ones. Two causes, both fixed here:
+    // practice only Daily ones. Two causes, both fixed:
     //  1. it filtered status in ('pending','overdue'). A Daily duty that lapses becomes
     //     'missed', so yesterday's undone work silently vanished. Missed items are now
     //     shown for 14 days and are still tickable (checklist_mark records them late).
-    //  2. it filtered due_date <= today, so a Weekly/Monthly/Quarterly/Yearly duty was
-    //     invisible until its date arrived - and the sweep does not even create the
-    //     occurrence until then. "All my duties" below reads kart.checklists directly,
-    //     so everyone can see their whole list and when each one next falls due.
-    const t=today(), cutoff=addDays(t,-14);
+    //  2. it filtered due_date <= today, so a Weekly/Monthly+ duty was invisible until
+    //     its date arrived - and the sweep does not create the occurrence until then.
+    //     The duty sections below read kart.checklists directly.
+    // Restructured 14-Sep-2026 on Prateek's instructions: open tasks first, KPI tiles
+    // dropped (they looked clickable but were not), the 7-day look-ahead replaced by
+    // "Due This Month", and the full duty list put behind a frequency picker.
+    const t=today(), cutoff=addDays(t,-14), mEnd=monthEnd();
     const [ts,ms,cls]=await Promise.all([
       q('v_tasks', x=>x.eq('assignee_email',ME.email).eq('status','OPEN').order('due_current')),
       q('v_checklist_marks', x=>x.eq('assignee_email',ME.email)
@@ -429,18 +431,24 @@ const render={
     // rows arrives as an array; interpolating one directly joins it with commas
     const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
 
-    const MISS_SHOWN=20, horizon=addDays(t,7);
-    const soon = cls.filter(c=>c.next_due>t && c.next_due<=horizon)
-                    .sort((a,b)=>a.next_due.localeCompare(b.next_due)||a.title.localeCompare(b.title));
-    const ORDER=['D','W','M','Q','H','Y'];
-    const byFreq={}; cls.forEach(c=>(byFreq[c.frequency]=byFreq[c.frequency]||[]).push(c));
+    const MISS_SHOWN=20;
+    // Everything still to fall due before the month is out, any frequency. kart.sweep
+    // always advances next_due past today, so these are genuinely upcoming, not backlog.
+    const thisMonth = cls.filter(c=>c.next_due<=mEnd)
+                         .sort((a,b)=>a.next_due.localeCompare(b.next_due)||a.title.localeCompare(b.title));
+    MY_CLS=cls; MY_FREQ='';
 
     view(`${topbar('My Pending Tasks',`${esc(ME.full_name)} — everything on your plate`,'<button class="btn ghost" onclick="go(\'mytasks\')">⟳ Refresh</button>')}
-      <div class="kpis">
-        ${kpi('Due today',dueToday.length+openTasks.filter(x=>x.due_current<=t).length,'blue')}
-        ${kpi('Overdue',overdue.length+openTasks.filter(x=>x.due_current<t).length,'red')}
-        ${kpi('Missed, last 14 days',missed.length,'amber')}
-        ${kpi('My duties in total',cls.length,'')}
+
+      <div class="panel"><div class="ph"><h2>My open tasks</h2>
+        <span style="color:var(--muted);font-size:12px">One-off tasks with a fixed deadline</span></div>
+        ${openTasks.length?`<table><thead><tr><th>Task ID</th><th>Task</th><th>From</th><th>Deadline</th><th>Action</th></tr></thead><tbody>`+
+          openTasks.map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td>
+            <td>${esc(x.title)}${x.detail?`<br><span style="color:var(--muted);font-size:12px">${esc(x.detail)}</span>`:''}</td>
+            <td>${esc(x.assigned_by_name||'')}</td>
+            <td>${fmt(x.due_current)} ${x.due_current<t?'<span class="pill late">overdue</span>':''}</td>
+            <td><button class="btn green" onclick="doDone('${x.id}')">✓ Done</button> <button class="btn" onclick="doRevise('${x.id}')">⟳ Move</button></td></tr>`).join('')+`</tbody></table>`
+          :'<p style="color:var(--muted)">No open tasks.</p>'}
       </div>
 
       <div class="panel"><div class="ph"><h2>Due today</h2></div>
@@ -454,23 +462,22 @@ const render={
           :'<p style="color:var(--muted)">Nothing overdue ✓</p>'}
       </div>
 
-      <div class="panel"><div class="ph"><h2>Coming up in the next 7 days</h2>
-        <span style="color:var(--muted);font-size:12px">Weekly and monthly duties appear here before their day arrives</span></div>
-        ${soon.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th></tr></thead><tbody>
-          ${soon.map(c=>`<tr><td>${esc(c.title)}</td><td>${FREQ[c.frequency]||c.frequency}</td>
+      <div class="panel"><div class="ph"><h2>Due This Month</h2>
+        <span style="color:var(--muted);font-size:12px">Everything still to fall due before ${fmt(mEnd)}, any frequency</span></div>
+        ${thisMonth.length?`<table><thead><tr><th>Duty</th><th>Frequency</th><th>Due</th></tr></thead><tbody>
+          ${thisMonth.map(c=>`<tr><td>${esc(c.title)}</td><td>${FREQ[c.frequency]||c.frequency}</td>
             <td>${dayName(c.next_due)} ${fmt(c.next_due)}</td></tr>`).join('')}
           </tbody></table>`
-          :'<p style="color:var(--muted)">Nothing falls due in the next 7 days.</p>'}
+          :'<p style="color:var(--muted)">Nothing further falls due this month.</p>'}
       </div>
 
       <div class="panel"><div class="ph"><h2>All my duties</h2>
-        <span style="color:var(--muted);font-size:12px">${cls.length} in total, with the date each one next falls due</span></div>
-        ${cls.length?ORDER.filter(f=>byFreq[f]).map(f=>`
-          <h3 style="margin:14px 0 6px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">${FREQ[f]||f} · ${byFreq[f].length}</h3>
-          <table><thead><tr><th>Duty</th><th>Next due</th></tr></thead><tbody>
-          ${byFreq[f].map(c=>`<tr><td>${esc(c.title)}</td><td>${dayName(c.next_due)} ${fmt(c.next_due)}${c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}
-          </tbody></table>`).join('')
-          :'<p style="color:var(--muted)">No duties assigned to you.</p>'}
+        <span style="color:var(--muted);font-size:12px">${cls.length} in total — choose a frequency to see them</span></div>
+        <div id="duty-picker" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          ${['D','W','M','Q','H','Y'].map(f=>`<button class="btn ghost" data-f="${f}" onclick="dutyShow('${f}')">${FREQ[f]}${MY_CLS.filter(c=>c.frequency===f).length?` (${MY_CLS.filter(c=>c.frequency===f).length})`:''}</button>`).join('')}
+          <button class="btn ghost" data-f="ALL" onclick="dutyShow('ALL')">Show All</button>
+        </div>
+        <div id="duty-body"></div>
       </div>
 
       <div class="panel"><div class="ph"><h2>Missed in the last 14 days</h2>
@@ -478,17 +485,8 @@ const render={
         ${missed.length?tbl(missed.slice(0,MISS_SHOWN).map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
             +(missed.length>MISS_SHOWN?`<p style="color:var(--muted);font-size:12px;margin-top:8px">Showing the most recent ${MISS_SHOWN} of ${missed.length}.</p>`:'')
           :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
-      </div>
-
-      <div class="panel"><div class="ph"><h2>My open tasks</h2></div>
-        ${openTasks.length?`<table><thead><tr><th>Task ID</th><th>Task</th><th>From</th><th>Deadline</th><th>Action</th></tr></thead><tbody>`+
-          openTasks.map(x=>`<tr><td><span class="idbadge">${esc(x.task_no)}</span></td>
-            <td>${esc(x.title)}${x.detail?`<br><span style="color:var(--muted);font-size:12px">${esc(x.detail)}</span>`:''}</td>
-            <td>${esc(x.assigned_by_name||'')}</td>
-            <td>${fmt(x.due_current)} ${x.due_current<t?'<span class="pill late">overdue</span>':''}</td>
-            <td><button class="btn green" onclick="doDone('${x.id}')">✓ Done</button> <button class="btn" onclick="doRevise('${x.id}')">⟳ Move</button></td></tr>`).join('')+`</tbody></table>`
-          :'<p style="color:var(--muted)">No open tasks.</p>'}
       </div>`);
+    dutyRender();
   },
   async progress(){ await summaryScreen('ontime'); },
   async checklists(){
@@ -571,11 +569,44 @@ function drawSummaryCharts(people, T){
     options:{plugins:{legend:{position:'bottom'}},responsive:true,maintainAspectRatio:false}}));
 }
 
+// ---- "All my duties" frequency picker (My Pending Tasks) ----
+// Nothing is listed until a frequency is chosen; "Show All" groups every duty by
+// frequency. Reads MY_CLS, which mytasks() fills - no refetch on each click.
+function dutyShow(f){ MY_FREQ = (MY_FREQ===f ? '' : f); dutyRender(); }
+function dutyRender(){
+  const box=$('#duty-body'); if(!box) return;
+  document.querySelectorAll('#duty-picker button').forEach(b=>{
+    const on = b.dataset.f===MY_FREQ;
+    b.className = on ? 'btn green' : 'btn ghost';
+  });
+  const t=today(), ORDER=['D','W','M','Q','H','Y'];
+  const table=list=>`<table><thead><tr><th>Duty</th><th>Next due</th></tr></thead><tbody>${
+    list.map(c=>`<tr><td>${esc(c.title)}</td><td>${dayName(c.next_due)} ${fmt(c.next_due)}${
+      c.next_due<=t?' <span class="pill open">due now</span>':''}</td></tr>`).join('')}</tbody></table>`;
+  if(!MY_FREQ){
+    box.innerHTML='<p style="color:var(--muted);padding:6px 0">Pick a frequency above to list those duties, or Show All.</p>';
+    return;
+  }
+  if(MY_FREQ==='ALL'){
+    const byFreq={}; MY_CLS.forEach(c=>(byFreq[c.frequency]=byFreq[c.frequency]||[]).push(c));
+    box.innerHTML = MY_CLS.length ? ORDER.filter(f=>byFreq[f]).map(f=>`
+      <h3 style="margin:14px 0 6px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">${FREQ[f]||f} · ${byFreq[f].length}</h3>
+      ${table(byFreq[f])}`).join('')
+      : '<p style="color:var(--muted)">No duties assigned to you.</p>';
+    return;
+  }
+  const list=MY_CLS.filter(c=>c.frequency===MY_FREQ);
+  box.innerHTML = list.length ? table(list)
+    : `<p style="color:var(--muted);padding:6px 0">You have no ${(FREQ[MY_FREQ]||MY_FREQ).toLowerCase()} duties.</p>`;
+}
+
 // ---- overview / pending helpers ----
 function dayName(iso){ return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(iso+'T00:00:00').getDay()]; }
 function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
 function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
 function monthStart(){ return today().slice(0,8)+'01'; }
+function monthEnd(){ const d=new Date(today()+'T00:00:00'); return new Date(d.getFullYear(), d.getMonth()+1, 0)
+  .toLocaleDateString('en-CA'); }
 function ovApply(tab){ const f=$('#ov-from').value, t=$('#ov-to').value;
   if(f&&t&&f>t){ toast('From date is after the To date'); return; }
   OV_FROM=f||'2026-04-01'; OV_TO=t||today(); go(tab||'overview'); }
