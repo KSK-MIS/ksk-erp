@@ -347,6 +347,23 @@ const render={
       qAll('v_checklist_marks', x=>x.in('status',['pending','overdue','missed'])
              .gte('due_date',cutoff).lte('due_date',t).order('due_date'))
     ]);
+
+    PEND={};
+    const bucket=m => m.status==='missed' ? 'missed'
+                    : (m.status==='overdue' || m.due_date<t) ? 'overdue' : 'today';
+    const slot=(email,name)=>PEND[email]||(PEND[email]={name,email,items:[],today:0,overdue:0,missed:0});
+    marks.forEach(m=>{
+      const e=slot(m.assignee_email||'?', m.assignee_name);
+      const b=bucket(m); e[b]++;
+      e.items.push({kind:'duty', id:m.id, title:m.title, freq:m.frequency, due:m.due_date, bucket:b});
+    });
+    tasks.forEach(x=>{
+      const e=slot(x.assignee_email||'?', x.assignee_name);
+      const b=x.due_current<t?'overdue':'today'; e[b]++;
+      e.items.push({kind:'task', id:x.id, title:x.title, freq:'—', due:x.due_current,
+                    bucket:b, task_no:x.task_no});
+    });
+
     const emps=Object.values(PEND)
       .sort((a,b)=>(b.overdue+b.missed)-(a.overdue+a.missed) || b.items.length-a.items.length
                  || (a.name||'').localeCompare(b.name||''));
