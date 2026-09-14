@@ -106,7 +106,7 @@
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 
-let ME=null, USERS=[], TAB='overview', CHK_FILTER='', ASSIGN_ROWS=0;
+let ME=null, USERS=[], TAB='pending', CHK_FILTER='', ASSIGN_ROWS=0;
 let OV_TASKS=[], PEND={}, CHARTS=[], MY_CLS=[], MY_FREQ='', BADGE={pending:0,mytasks:0,checklists:0};
 let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
@@ -154,12 +154,11 @@ function view(html){ $('#view').innerHTML=html; document.body.classList.remove('
 
 // ---- nav / shell ----
 const NAV=[
-  {id:'overview',  label:'Completion',      icon:'📋', admin:true},
-  {id:'pending',   label:'Team Tasks',      icon:'⚠️', admin:true},
+  {id:'assign',    label:'Assign Task',     icon:'➕', admin:true},
   {id:'mytasks',   label:'My Pending Tasks',icon:'🗒️', admin:false},
+  {id:'pending',   label:'Team Tasks',      icon:'⚠️', admin:true},
   {id:'progress',  label:'On-Time Performance',icon:'🎯', admin:true},
   {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
-  {id:'assign',    label:'Assign Task',     icon:'➕', admin:true},
 ];
 function drawShell(){
   $('#app').innerHTML=`
@@ -191,7 +190,7 @@ function drawNav(){
   }).join('');
 }
 function go(t){ if(NAV.find(n=>n.id===t&&n.admin)&&!isAdmin()) t='mytasks';
-  TAB=t; drawNav(); (render[t]||render[isAdmin()?'overview':'mytasks'])(); }
+  TAB=t; drawNav(); (render[t]||render[isAdmin()?'pending':'mytasks'])(); }
 
 function topbar(title,sub,right){
   return `<div class="topbar">
@@ -269,7 +268,7 @@ async function summaryScreen(mode){
         ? 'Ticked by its due date counts full · ticked late counts half'
         : 'Every duty completed, whether it was on time or late';
   const COL   = mode==='ontime' ? 'On-Time %' : 'Completion %';
-  const TAB   = mode==='ontime' ? 'progress' : 'overview';
+  const TAB   = 'progress';
 
   view(`${topbar(TITLE,`${fmt(from)} to ${fmt(to)} · ${SUB}`,
       `<button class="btn ghost" onclick="go('${TAB}')">⟳ Refresh</button>`)}
@@ -335,7 +334,6 @@ async function summaryScreen(mode){
 
 // ---- screens ----
 const render={
-  async overview(){ await summaryScreen('coverage'); },
   async pending(){
     // Rewritten 12-Sep-2026. This screen used to read ONLY kart.tasks (one-off tasks)
     // with status OPEN. Nobody has ever created a one-off task - all 153 duties are
@@ -344,11 +342,22 @@ const render={
     // Same three buckets as My Pending Tasks, so the two screens agree:
     //   due today · overdue (carried forward) · missed in the last 14 days (still tickable)
     const t=today(), cutoff=addDays(t,-14);
-    const [tasks,marks]=await Promise.all([
+    const [tasks,marks,summary]=await Promise.all([
       q('v_tasks', x=>x.eq('status','OPEN')),
       qAll('v_checklist_marks', x=>x.in('status',['pending','overdue','missed'])
-             .gte('due_date',cutoff).lte('due_date',t).order('due_date'))
+             .gte('due_date',cutoff).lte('due_date',t).order('due_date')),
+      sb.rpc('kart_summary',{p_from:OV_FROM,p_to:OV_TO||t})
     ]);
+    // Completion, folded in from the old Completion tab (14-Sep-2026). Same kart_summary
+    // RPC that feeds On-Time Performance; the difference is only that a late tick counts
+    // in full here and half there. Date-ranged, unlike the live lists above.
+    const comp=(summary&&summary.data||[]).map(r=>({name:r.full_name,assigned:+r.assigned,
+                  done:+r.ontime + +r.late, pending:+r.pending, overdue:+r.overdue}))
+                .sort((a,b)=>b.assigned-a.assigned);
+    const CT=comp.reduce((s,r)=>({assigned:s.assigned+r.assigned,done:s.done+r.done,
+                  pending:s.pending+r.pending,overdue:s.overdue+r.overdue}),
+                  {assigned:0,done:0,pending:0,overdue:0});
+    const cpct=r=>r.assigned?Math.round(100*r.done/r.assigned):null;
 
     PEND={};
     const bucket=m => m.status==='missed' ? 'missed'
@@ -399,6 +408,37 @@ const render={
           <div class="search" style="max-width:none"><input id="emp-q" placeholder="🔍 Search employee…" oninput="pendFilter()"></div>
           <div id="emp-list" style="margin-top:10px">${list}</div></div>
         <div class="panel" id="emp-detail"><p style="color:var(--muted);text-align:center;padding:40px">Select an employee to view their outstanding duties</p></div>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <div class="ph" style="gap:10px;flex-wrap:wrap">
+          <h2 style="margin-right:auto">Completion — ${fmt(OV_FROM)} to ${fmt(OV_TO||t)}</h2>
+          <label style="font-size:13px;color:var(--muted)">From
+            <input type="date" id="ov-from" value="${OV_FROM}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
+          <label style="font-size:13px;color:var(--muted)">To
+            <input type="date" id="ov-to" value="${OV_TO||t}" style="margin-left:6px;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></label>
+          <button class="btn green" onclick="ovApply('pending')">Apply</button>
+          <button class="btn ghost" onclick="ovPreset('2026-04-01','pending')">FY to date</button>
+          <button class="btn ghost" onclick="ovPreset(monthStart(),'pending')">This month</button>
+        </div>
+        <table><thead><tr><th>Name</th><th class="num">Assigned</th><th class="num">Completed</th>
+          <th class="num">Pending</th><th class="num">Overdue</th><th>Completion %</th></tr></thead><tbody>
+        ${comp.map(r=>{ const p=cpct(r), c=p>=75?'#15803d':p>=40?'#c9a227':'#b42318';
+          return `<tr><td>${esc(r.name)}</td><td class="num">${r.assigned}</td><td class="num">${r.done}</td>
+            <td class="num">${r.pending}</td>
+            <td class="num"${r.overdue?' style="color:var(--red);font-weight:700"':''}>${r.overdue}</td>
+            <td><div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:8px;background:#eef2f0;border-radius:5px;overflow:hidden">
+                <div style="width:${p||0}%;height:100%;background:${c}"></div></div>
+              <span style="font-size:12px;min-width:34px;text-align:right">${p===null?'-':p+'%'}</span></div></td></tr>`;
+        }).join('')}
+        </tbody>
+        <tfoot><tr class="total"><td>All employees</td><td class="num">${CT.assigned}</td><td class="num">${CT.done}</td>
+          <td class="num">${CT.pending}</td><td class="num">${CT.overdue}</td>
+          <td>${cpct(CT)===null?'-':cpct(CT)+'%'}</td></tr></tfoot></table>
+        <p style="color:var(--muted);font-size:12px;margin-top:10px">
+          A duty counts as completed whether it was ticked on time or late. For the stricter view that
+          half-credits a late tick, see On-Time Performance. Written-off (amnestied) occurrences are excluded.</p>
       </div>`);
   },
   async mytasks(){
@@ -523,7 +563,7 @@ const render={
       </div>`);
   },
   async assign(){
-    view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'overview\')">← Back to Overview</button>')}
+    view(`${topbar('Assign Task','Each task can have its own deadline','<button class="btn ghost" onclick="go(\'pending\')">← Back to Team Tasks</button>')}
       <div class="panel">
         <div class="ph"><h2>📋 Task Assignment Form</h2></div>
         <label class="lb">Employee</label>
@@ -612,8 +652,8 @@ function monthEnd(){ const d=new Date(today()+'T00:00:00'); return new Date(d.ge
   .toLocaleDateString('en-CA'); }
 function ovApply(tab){ const f=$('#ov-from').value, t=$('#ov-to').value;
   if(f&&t&&f>t){ toast('From date is after the To date'); return; }
-  OV_FROM=f||'2026-04-01'; OV_TO=t||today(); go(tab||'overview'); }
-function ovPreset(f,tab){ OV_FROM=f; OV_TO=today(); go(tab||'overview'); }
+  OV_FROM=f||'2026-04-01'; OV_TO=t||today(); go(tab||'progress'); }
+function ovPreset(f,tab){ OV_FROM=f; OV_TO=today(); go(tab||'progress'); }
 function pendFilter(){ const term=$('#emp-q').value.toLowerCase(); document.querySelectorAll('#emp-list .emprow').forEach(el=>{ el.style.display=el.textContent.toLowerCase().includes(term)?'':'none'; }); }
 function pendSel(email){ const e=PEND[email]; if(!e)return;
   const TAG={today:'<span class="pill open">Due today</span>',
@@ -647,7 +687,7 @@ async function submitAssign(){
   const who=$('#as-who').value;
   const descs=[...document.querySelectorAll('.as-desc')], dates=[...document.querySelectorAll('.as-date')];
   let n=0; for(let i=0;i<descs.length;i++){ const t=descs[i].value.trim(); if(!t)continue; await rpc('task_create',{p_title:t,p_detail:null,p_assignee_email:who,p_due:dates[i].value}); n++; }
-  if(!n)return toast('Add at least one task'); toast(n+' task(s) assigned'); await refreshBadges(); go('overview');
+  if(!n)return toast('Add at least one task'); toast(n+' task(s) assigned'); await refreshBadges(); go('pending');
 }
 
 // ---- actions (every write goes through a guarded RPC) ----
@@ -689,7 +729,7 @@ async function refreshBadges(){
   USERS=await q('v_users', x=>x.order('full_name'));
   document.title = possessive(ME.full_name)+' Task List · KSK ERP';
   await refreshBadges();
-  drawShell(); go(isAdmin()?'overview':'mytasks');
+  drawShell(); go(isAdmin()?'pending':'mytasks');
 })();
 </script>
 <script>
