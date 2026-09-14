@@ -548,20 +548,31 @@ const render={
     if(admin&&CHK_FILTER){ roster=roster.filter(c=>c.assignee_email===CHK_FILTER); marks=marks.filter(m=>m.assignee_email===CHK_FILTER); }
     let picker='';
     if(admin){
-      const people=[...new Map(cs.map(c=>[c.assignee_email,c.assignee_name])).entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
+      // Built from USERS (every active person), not from the checklists that happen to
+      // exist. Building it from `cs` meant anyone with no duties yet - Prateek and
+      // Kaushik - was missing from the list entirely, so you could not select them to
+      // see that they have none. Everyone now appears, with a (0) where that is the case.
+      const people=USERS.map(u=>[u.email,u.full_name]).sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
+      const nDuties=em=>cs.filter(c=>c.assignee_email===em).length;
       picker=`<label class="lb">View checklist for</label>
         <select class="inp" style="max-width:340px" onchange="setChkFilter(this.value)">
           <option value="">All people (${cs.length})</option>
-          ${people.map(([em,nm])=>`<option value="${esc(em)}" ${CHK_FILTER===em?'selected':''}>${esc(nm)} (${cs.filter(c=>c.assignee_email===em).length})</option>`).join('')}
+          ${people.map(([em,nm])=>`<option value="${esc(em)}" ${CHK_FILTER===em?'selected':''}>${esc(nm)} (${nDuties(em)})</option>`).join('')}
         </select>`;
     }
-    const picked=admin&&CHK_FILTER?(cs.find(c=>c.assignee_email===CHK_FILTER)||{}).assignee_name:'';
+    // fall back to USERS: a person with zero duties has no row in cs to read a name from
+    const picked=admin&&CHK_FILTER
+      ? ((cs.find(c=>c.assignee_email===CHK_FILTER)||{}).assignee_name
+         || (USERS.find(u=>u.email===CHK_FILTER)||{}).full_name || '')
+      : '';
     view(`${topbar('Checklists','Recurring duties & occurrences', admin?`<button class="btn green" onclick="addDuty()">＋ Add Duty</button>`:'')}
       <div class="panel">${picker}
         <div class="ph" style="margin-top:12px"><h2>${admin?(picked?esc(picked)+' — duties':'All duties'):'My duties'} (${roster.length})</h2></div>
         ${roster.length?`<table><thead><tr><th>Duty</th>${admin?'<th>Assignee</th>':''}<th>Frequency</th><th>On miss</th><th>Next due</th>${admin?'<th></th>':''}</tr></thead><tbody>`+
           roster.map(c=>`<tr><td>${esc(c.title)}</td>${admin?`<td>${esc(c.assignee_name)}</td>`:''}<td>${FREQ[c.frequency]||c.frequency}</td><td>${c.on_miss}</td><td>${fmt(c.next_due)}</td>${admin?`<td><button class="btn" onclick="doRetire('${c.id}')">Retire</button></td>`:''}</tr>`).join('')+`</tbody></table>`
-          :'<p style="color:var(--muted)">No duties.</p>'}
+          :`<p style="color:var(--muted)">${admin&&CHK_FILTER
+              ? esc(picked||'This person')+' has no recurring duties yet — use ＋ Add Duty to create one.'
+              : 'No duties.'}</p>`}
       </div>
       <div class="panel"><div class="ph"><h2>Recent Occurrences</h2></div>
         ${marks.length?`<table><thead><tr><th>Duty</th>${admin?'<th>Assignee</th>':''}<th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>`+
