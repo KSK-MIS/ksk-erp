@@ -685,14 +685,56 @@ async function doReviseGo(id){ const d=$('#rv-d').value, r=$('#rv-r').value; if(
   await rpc('task_revise',{p_task_id:id,p_new_due:d,p_reason:r}); toast('Date moved — reason logged'); closeDlg(); render[TAB](); }
 function doRetire(id){ if(!confirm('Retire this duty? It stops recurring and pending marks are withdrawn. History is kept.'))return;
   rpc('checklist_retire',{p_checklist_id:id}).then(()=>{ toast('Retired'); render.checklists(); }); }
-function addDuty(){ dlg(`<div class="ph"><h2>New Duty</h2></div>
+// A duty's FIRST due date is what every later occurrence is counted from - kart.advance()
+// just adds 7 days / 1 month / 3 / 6 / 12 to it. Until 25-Sep-2026 this dialog never asked
+// for it, so checklist_create fell back to today and every new duty inherited whatever day
+// it happened to be created on. That is the same defect that left the whole company's
+// weeklies on a Monday and everything else on the 13th (see duty_schedule_dates in the
+// project notes) - it was fixed in the data, but the form kept reintroducing it.
+// The RPC already accepted p_start; only the form was missing.
+function addDuty(){
+  const t=today();
+  dlg(`<div class="ph"><h2>New Duty</h2></div>
   <label class="lb">Duty</label><input id="ck-title" class="inp" placeholder="e.g. Daily production report">
   <label class="lb">Assignee</label><select id="ck-who" class="inp">${USERS.map(u=>`<option value="${esc(u.email)}">${esc(u.full_name)}</option>`).join('')}</select>
-  <label class="lb">Frequency</label><select id="ck-freq" class="inp">${Object.entries(FREQ).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
-  <label class="lb">If missed</label><select id="ck-miss" class="inp"><option value="lapse">lapse — record &amp; move on</option><option value="carry">carry — stays owed</option></select>
-  <div style="margin-top:16px;display:flex;gap:8px"><button class="btn green" onclick="ckCreate()">Create</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`); }
-async function ckCreate(){ const t=$('#ck-title').value; if(!t.trim())return toast('Title required');
-  await rpc('checklist_create',{p_title:t,p_assignee_email:$('#ck-who').value,p_freq:$('#ck-freq').value,p_on_miss:$('#ck-miss').value});
+  <label class="lb">Frequency</label><select id="ck-freq" class="inp" onchange="ckHint()">${Object.entries(FREQ).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+  <label class="lb">First due date</label><input id="ck-start" type="date" class="inp" value="${t}" min="${t}" onchange="ckHint()">
+  <p id="ck-hint" style="color:var(--muted);font-size:12px;margin:6px 0 0"></p>
+  <label class="lb" style="margin-top:14px">If missed</label><select id="ck-miss" class="inp"><option value="lapse">lapse — record &amp; move on</option><option value="carry">carry — stays owed</option></select>
+  <div style="margin-top:16px;display:flex;gap:8px"><button class="btn green" onclick="ckCreate()">Create</button><button class="btn" onclick="closeDlg()">Cancel</button></div>`);
+  ckHint();
+}
+
+// Spells out, in words, what the chosen date actually commits the person to. The date
+// alone is ambiguous - "07-10-2026" on a Monthly duty means the 7th of every month, and
+// people should see that before they save, not discover it a month later.
+function ckHint(){
+  const el=$('#ck-hint'); if(!el) return;
+  const f=$('#ck-freq').value, d=$('#ck-start').value;
+  if(!d){ el.textContent=''; return; }
+  const dt=new Date(d+'T00:00:00');
+  const DAY=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dt.getDay()];
+  const MON=['January','February','March','April','May','June','July','August','September','October','November','December'][dt.getMonth()];
+  const dom=dt.getDate(), ord=n=>n+(['th','st','nd','rd'][(n%100-n%10!=10)*(n%10<4)*n%10]||'th');
+  let msg;
+  if(f==='D')      msg='Repeats every working day. Sundays and holidays are skipped automatically.';
+  else if(f==='W') msg='Repeats every '+DAY+'.';
+  else if(f==='M') msg='Repeats on the '+ord(dom)+' of every month.';
+  else if(f==='Q') msg='Repeats every 3 months, on the '+ord(dom)+'.';
+  else if(f==='H') msg='Repeats every 6 months, on the '+ord(dom)+'.';
+  else             msg='Repeats every year, on '+ord(dom)+' '+MON+'.';
+  // the Sunday rule is enforced in the database (kart.due_working); say so here so nobody
+  // is surprised when the duty turns up a day earlier than the date they typed
+  if(f!=='D' && dt.getDay()===0) msg+=' That is a Sunday, so it will be raised on the Saturday before.';
+  el.textContent=msg;
+}
+
+async function ckCreate(){
+  const t=$('#ck-title').value, start=$('#ck-start').value;
+  if(!t.trim())  return toast('Title required');
+  if(!start)     return toast('Pick the first due date');
+  await rpc('checklist_create',{p_title:t,p_assignee_email:$('#ck-who').value,p_freq:$('#ck-freq').value,
+                                p_on_miss:$('#ck-miss').value,p_start:start});
   await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); closeDlg(); CHK_FILTER=''; render.checklists(); }
 function setChkFilter(v){ CHK_FILTER=v; render.checklists(); }
 async function refreshBadges(){
