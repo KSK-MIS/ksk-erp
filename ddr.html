@@ -128,6 +128,9 @@
   input.vin{width:100%;min-width:90px;padding:4px 6px;border:1px solid var(--line);border-radius:3px;
     font-family:inherit;font-size:12.5px;background:#fff;color:var(--ink)}
   input.vin:focus{outline:2px solid #aecbf5;outline-offset:-1px}
+  .vfin{font-size:12px;color:var(--ink-3);padding:6px 10px;border-top:1px solid var(--line-2)}
+  .vlink{background:none;border:0;padding:0;font-family:inherit;font-size:12px;color:var(--ink-3);text-decoration:underline;cursor:pointer}
+  .vlink:hover{color:var(--navy)} .vlink:disabled{opacity:.5;cursor:default}
   .vq{margin:0 14px 12px;border:1px solid #f0b3ab;border-left:4px solid var(--bad);border-radius:3px;background:var(--bad-bg);padding:10px 12px}
   .vq b.h{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--bad);margin-bottom:6px}
   .vq .qi{font-size:13px;padding:4px 0;border-top:1px solid #f0b3ab;line-height:1.5}
@@ -366,12 +369,14 @@ const STG={
   draft:           {t:'Not submitted',        c:'no',   b:'red'},
   prepared:        {t:'Awaiting checking',    c:'part', b:'amber'},
   checking:        {t:'Partly checked',       c:'part', b:'amber'},
-  queried:         {t:'Figures queried',      c:'no',   b:'red'},
+  queried:         {t:'Deviation recorded — checking not complete', c:'part', b:'amber'},
   checked:         {t:'Checked — awaiting sign-off', c:'part', b:'amber'},
   signed:          {t:'Signed off',           c:'ok',   b:'green'},
   signed_override: {t:'Signed off — override',c:'part', b:'amber'}
 };
-const dts=t=>t?new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+/* Every sign-off is shown with its full date and time to the second, always in IST,
+   whatever the clock of the device it is read on. */
+const dts=t=>t?new Date(t).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})+' IST':'';
 const so=(stage,email)=>(REP.signoffs||[]).find(s=>s.stage===stage&&(!email||s.actor_email===email));
 const allTicked=s=>!!s&&VSEC.every(([k])=>(s.sections||{})[k]===true);
 
@@ -433,63 +438,79 @@ const needMsg=bad=>'Tick OK, or give both the correct figure and a remark, for: 
 
 function verifyBlock(){
   if(!REP) return '';
-  const st=STG[REP.stage]||STG.draft;
   const me=(REP.my_email||'').toLowerCase(), role=REP.my_ddr_role;
   const prep=so('prepare'), appr=so('approve'), checkers=REP.checkers||[];
+  /* A deviation is a section left unticked with the correct figure and a remark against
+     it. It is a record, not a block: once every checker has submitted, the day is
+     'checked' and the Director's sign-off is an ordinary one. Postgres decides the stage
+     (ddr.recompute_stage) — the controls below only mirror it. */
+  const hasDev=s=>!!s&&!allTicked(s);
+  const anyDev=(REP.signoffs||[]).some(s=>s.stage!=='approve'&&hasDev(s));
+  let st=STG[REP.stage]||STG.draft;
+  if(anyDev&&REP.stage==='checked') st={t:'Checked — deviations recorded, awaiting sign-off',c:'part',b:'amber'};
+  if(anyDev&&REP.stage==='signed')  st={t:'Signed off — deviations on record',c:'ok',b:'green'};
 
   // --- step 1: prepared — the maker ticks the same four sections ---
-  const s1mine=(role==='maker'||role==='approver');
+  /* The Director may prepare a day when the preparer is away, so the grid is open to
+     both — but only until someone has submitted. A submission is final, and it carries
+     the name of the person who made it; "(you)" appears only on your own. */
+  const canPrep=!prep&&(role==='maker'||role==='approver');
+  const prepMine=prep?(prep.actor_email===me):(role==='maker');
   const s1=`<li class="vstep ${prep?'done':'now'}">
     <span class="vnum">${prep?'&#10003;':'1'}</span>
     <div class="vb">
       <div class="vt">Prepared<span class="vby">${prep?esc(prep.actor_name)+' &middot; '+dts(prep.at):'not yet submitted for checking'}</span></div>
-      <div class="vrow ${s1mine?'mine':''}">
-        <div class="vnh"><span class="vnm">${prep?esc(prep.actor_name):'Preparer'}${s1mine?' (you)':''}</span>
+      <div class="vrow ${canPrep||prepMine?'mine':''}">
+        <div class="vnh"><span class="vnm">${prep?esc(prep.actor_name):'Preparer'}${prepMine?' (you)':''}</span>
           <span class="vst">${prep?dts(prep.at):'not yet submitted'}</span>
-          ${prep?(allTicked(prep)?'<span class="badge green">All four tie</span>':'<span class="badge red">Query raised</span>'):''}</div>
-        ${grid(prep,s1mine,'p')}
+          ${prep?(allTicked(prep)?'<span class="badge green">All four tie</span>':'<span class="badge amber">Deviation recorded</span>'):''}</div>
+        ${grid(prep,canPrep,'p')}
       </div>
-      ${prep&&prep.remarks&&!s1mine?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
-      ${s1mine?`<textarea id="p-rem" placeholder="Overall note for the checkers (optional)">${esc(prep&&prep.remarks||'')}</textarea>
-        <div class="vact"><button class="cmd primary" id="p-save">${prep?'Update submission':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
+      ${prep&&prep.remarks?`<div class="vrem"><b>Note to checkers:</b> ${esc(prep.remarks)}</div>`:''}
+      ${canPrep?`<div class="vact"><button class="cmd primary" id="p-save">${role==='approver'?'Prepare this day myself':'Submit for checking'}</button><span class="vmsg" id="p-msg"></span></div>`:''}
     </div></li>`;
 
   // --- step 2: checked, one grid per checker ---
   const s2done=['checked','signed','signed_override'].indexOf(REP.stage)>=0;
   const rows=checkers.map((c,i)=>{
     const row=so('check',c.email), mine=(c.email===me&&role==='checker'), ok=allTicked(row);
+    const canCheck=mine&&!row;   // a check, once saved, is final
     const state=ok?'<span class="badge green">Checked</span>'
-              :row?'<span class="badge red">Query raised</span>'
+              :row?'<span class="badge amber">Deviation recorded</span>'
                   :'<span class="vst">not yet checked</span>';
     return `<div class="vrow ${mine?'mine':''}">
         <div class="vnh"><span class="vnm">${esc(c.full_name)}${mine?' (you)':''}</span>
           <span class="vst">${row?dts(row.at):''}</span>${state}</div>
-        ${grid(row,mine,'c'+i)}
+        ${grid(row,canCheck,'c'+i)}
+        ${mine&&row?'<div class="vfin">Your check is saved and cannot be revised.</div>':''}
       </div>
-      ${row&&row.remarks&&!mine?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
-      ${mine?`<textarea id="c-rem" placeholder="Overall remark (optional)">${esc(row&&row.remarks||'')}</textarea>
-        <div class="vact"><button class="cmd primary" id="c-save" data-i="${i}" ${prep?'':'disabled'}>Save my check</button>
+      ${row&&row.remarks?`<div class="vrem"><b>${esc(c.full_name)}:</b> ${esc(row.remarks)}</div>`:''}
+      ${canCheck?`<div class="vact"><button class="cmd primary" id="c-save" data-i="${i}" ${prep?'':'disabled'}>Save my check</button>
         <span class="vmsg" id="c-msg">${prep?'':'Waiting on the preparer to submit.'}</span></div>`:''}`;
   }).join('');
   const s2 = `<li class="vstep ${s2done?'done':(prep?'now':'')}">
     <span class="vnum">${s2done?'&#10003;':'2'}</span>
-    <div class="vb"><div class="vt">Checked<span class="vby">both checkers must clear all four sections</span></div>
+    <div class="vb"><div class="vt">Checked<span class="vby">each checker ticks a section, or records the correct figure and a remark against it</span></div>
     ${rows||'<div class="vst">No checkers are configured.</div>'}</div></li>`;
 
   // --- step 3: signed off ---
+  /* 'checked' means every checker has submitted — with or without deviations — and the
+     sign-off is a plain one. Override is only for signing before that point. Reopen is
+     offered only after the day has been signed off, so the sign-off is on record first;
+     ddr_reopen enforces the same rule and logs every sign-off it clears. */
   const s3mine=(role==='approver');
   const ready=(REP.stage==='checked');
   const s3=`<li class="vstep ${appr?'done':(ready?'now':'')}">
     <span class="vnum">${appr?'&#10003;':'3'}</span>
     <div class="vb">
-      <div class="vt">Signed off<span class="vby">${appr?esc(appr.actor_name)+' &middot; '+dts(appr.at)+(appr.is_override?' &middot; before checking was complete':''):(ready?'ready for the Director':'waiting on the checkers')}</span></div>
+      <div class="vt">Signed off<span class="vby">${appr?esc(appr.actor_name)+' &middot; '+dts(appr.at)+(appr.is_override?' &middot; before checking was complete':''):(ready?(anyDev?'checked, deviations recorded — ready for the Director':'ready for the Director'):'waiting on the checkers')}</span></div>
       ${appr&&appr.remarks?`<div class="vrem"><b>Director:</b> ${esc(appr.remarks)}</div>`:''}
       ${appr&&appr.is_override?`<div class="vrem alert"><b>Signed without a complete check.</b> This was recorded as an override in the log.</div>`:''}
-      ${s3mine?`<textarea id="a-rem" placeholder="Remark on sign-off (optional)">${esc(appr&&appr.remarks||'')}</textarea>
+      ${s3mine&&!appr?`<textarea id="a-rem" placeholder="Remark on sign-off (optional)"></textarea>
         <div class="vact">
           <button class="cmd ${ready?'primary':'warn'}" id="a-save">${ready?'Sign off':'Sign off anyway (override)'}</button>
-          ${(REP.signoffs||[]).length?'<button class="cmd" id="a-reopen">Reopen</button>':''}
           <span class="vmsg" id="a-msg"></span></div>`:''}
+      ${s3mine&&appr?`<div class="vact"><button class="vlink" id="a-reopen">Reopen this day</button><span class="vmsg" id="a-msg"></span></div>`:''}
     </div></li>`;
 
   const reset=(REP.last_reset&&REP.stage!=='signed')
@@ -512,13 +533,15 @@ async function callStage(btn,msg,fn,args){
 function wireVerify(){
   /* Both grids are read through collect(), using the same id scheme grid() writes:
      '<gridId>-t|-c|-n-<section>'. The preparer's grid is 'p'; each checker's is
-     'c'+their index in REP.checkers, which is why the button carries data-i. */
+     'c'+their index in REP.checkers, which is why the button carries data-i.
+     The overall-note boxes were removed on 5 Oct 2026 — never once used; the remark
+     against each section carries the explanation. */
   if($('p-save')) $('p-save').onclick=()=>{
     const {sections,notes}=collect('p');
     const bad=shortfall(sections,notes);
     if(bad.length){$('p-msg').textContent=needMsg(bad);return;}
     callStage('p-save','p-msg','ddr_prepare',
-      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:$('p-rem').value});
+      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:null});
   };
 
   if($('c-save')) $('c-save').onclick=()=>{
@@ -526,17 +549,17 @@ function wireVerify(){
     const bad=shortfall(sections,notes);
     if(bad.length){$('c-msg').textContent=needMsg(bad);return;}
     callStage('c-save','c-msg','ddr_check',
-      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:$('c-rem').value});
+      {p_date:REP.report_date,p_sections:sections,p_notes:notes,p_remarks:null});
   };
 
   if($('a-save')) $('a-save').onclick=()=>{
     const over=(REP.stage!=='checked');
-    if(over&&!confirm('Checking is not complete for this day. Sign off anyway? This will be recorded as an override.')) return;
+    if(over&&!confirm('A checker has not yet submitted for this day. Sign off anyway? This will be recorded as an override.')) return;
     callStage('a-save','a-msg','ddr_approve',{p_date:REP.report_date,p_remarks:$('a-rem').value,p_override:over});
   };
 
   if($('a-reopen')) $('a-reopen').onclick=()=>{
-    const why=prompt('Reopening clears every sign-off on this day and sends it back to the preparer.\n\nReason:');
+    const why=prompt('Reopening clears every sign-off on this day, including yours, and sends it back to the preparer. The cleared sign-offs are kept in the log.\n\nReason:');
     if(!why||!why.trim()) return;
     callStage('a-reopen','a-msg','ddr_reopen',{p_date:REP.report_date,p_reason:why});
   };
@@ -613,7 +636,7 @@ async function load(date){
 async function loadDates(sel){
   const {data,error}=await sb.rpc('ddr_dates');
   if(error||!data)return;
-  const MARK={draft:'○',prepared:'◔',checking:'◑',checked:'◕',signed:'✓',signed_override:'!'};
+  const MARK={draft:'○',prepared:'◔',checking:'◑',queried:'◑',checked:'◕',signed:'✓',signed_override:'!'};
   $('datesel').innerHTML=data.map(r=>`<option value="${r.report_date}" ${sel===r.report_date?'selected':''}>${MARK[r.stage]||'○'} ${dl(r.report_date)}</option>`).join('');
 }
 
