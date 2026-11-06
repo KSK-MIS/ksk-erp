@@ -675,8 +675,11 @@ window.saveAccess=async function(){
 };
 
 $('btn-save').onclick=async()=>{
-  if(!ME||ME.role!=='DIRECTOR'){msg('admin-msg','Only a Director can save users.','err');return;}
-  const p={p_email:$('u-email').value,p_full_name:$('u-name').value,p_role:$('u-role').value,p_is_active:$('u-active').value==='true'};
+  if(!ME||(ME.role!=='DIRECTOR'&&ME.role!=='ADMIN')){msg('admin-msg','Only a Director or Admin can save users.','err');return;}
+  const em=($('u-email').value||'').trim().toLowerCase();
+  if(em&&!/@kskenggind\.com$/.test(em)){msg('admin-msg','Use the company address ending in @kskenggind.com (e.g. mverma@kskenggind.com), not the Gmail.','err');return;}
+  if(ME.role==='ADMIN'&&$('u-role').value!=='STAFF'){msg('admin-msg','An Admin can only add Staff users.','err');return;}
+  const p={p_email:em,p_full_name:$('u-name').value,p_role:$('u-role').value,p_is_active:$('u-active').value==='true'};
   if(!p.p_email||!p.p_full_name){msg('admin-msg','Email and name are both required.','err');return;}
   const{error}=await sb.rpc('user_save',p);
   if(error){msg('admin-msg',error.message,'err');return;}
