@@ -1,0 +1,725 @@
+<!doctype html>
+<!-- ============================================================
+     KSK ERP 1.0 — Module 2: ORDERS (Pending Order Register)
+     Tabs: Pending · Register · New PO (Admin+) · Value (Admin+)
+     Deploys on: GitHub Pages beside index.html. Upload whole, never edit.
+     Rates are NOT in this file's reach for Staff — the money view is
+     self-gated inside Postgres. This screen only asks; the DB decides.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders · KSK ERP</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root { --navy:#0f2440; --navy2:#16345c; --gold:#c9a227; --bg:#f4f6f9; --ok:#1e7e34; --bad:#b02a37; --warn:#a96b00; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { background:var(--bg); min-height:100vh; padding-bottom:70px; }
+  header { background:var(--navy); color:#fff; padding:12px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5; }
+  header a { color:var(--gold); text-decoration:none; font-size:20px; }
+  header h1 { font-size:16px; flex:1; } header h1 small { display:block; font-weight:400; opacity:.7; font-size:11px; }
+  .chip { background:var(--navy2); border:1px solid rgba(255,255,255,.25); border-radius:999px; padding:3px 9px; font-size:11.5px; }
+  nav { display:flex; overflow-x:auto; background:#fff; border-bottom:1px solid #e2e7ee; position:sticky; top:53px; z-index:4; }
+  nav button { flex:1; min-width:86px; padding:11px 6px; border:0; background:none; font-size:12.5px; font-weight:600; color:#667; border-bottom:3px solid transparent; cursor:pointer; }
+  nav button.on { color:var(--navy); border-color:var(--gold); }
+  main { max-width:100%; margin:0 auto; padding:12px; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(15,36,64,.08); padding:14px; margin-bottom:10px; }
+  .card.clickable { cursor:pointer; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  .t-title { font-size:14.5px; font-weight:600; color:#182b45; }
+  .t-sub { font-size:12px; color:#778; margin-top:2px; line-height:1.45; }
+  .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
+  .tag.late { background:#fdeaea; color:var(--bad); } .tag.ok { background:#e6f4ea; color:var(--ok); }
+  .tag.soon { background:#fff3d6; color:var(--warn); } .tag.cxl { background:#3a1f1f; color:#ffd9d9; } .tag.info { background:#e2ecff; color:#1c4fa0; }
+  .tag.GOVT { background:#e2ecff; color:#1c4fa0; } .tag.PVT { background:#efe7f7; color:#5b3a86; }
+  .tag.closed { background:#fff4e5; color:#8a5a00; border:1px solid #ffd699; }
+  button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
+  button.a.gold { background:var(--gold); color:var(--navy); } button.a.dark { background:var(--navy); color:#fff; }
+  input, select, textarea { width:100%; padding:11px; border:1px solid #cfd6e0; border-radius:9px; font-size:14px; margin-top:6px; background:#fff; }
+  label { font-size:11.5px; color:#556; display:block; margin-top:8px; }
+  h2 { font-size:13.5px; color:var(--navy); margin:14px 2px 8px; }
+  .muted { color:#778; font-size:12.5px; }
+  .kpi { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .kpi div { background:#fff; border-radius:10px; padding:10px; text-align:center; box-shadow:0 1px 3px rgba(15,36,64,.07); }
+  .kpi b { font-size:20px; color:var(--navy); display:block; } .kpi span { font-size:10.5px; color:#788; }
+  .kpi .alert b { color:var(--bad); }
+  .bar { height:6px; background:#eef1f5; border-radius:99px; overflow:hidden; margin-top:7px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:#788; font-size:10.5px; padding:6px 4px; border-bottom:1px solid #eef; }
+  td { padding:8px 4px; border-bottom:1px solid #f2f4f8; }
+  td.n, th.n { text-align:right; }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:10px 18px; border-radius:999px; font-size:13px; display:none; z-index:20; }
+  dialog { border:0; border-radius:14px; padding:18px; width:min(94vw,480px); max-height:88vh; }
+  dialog::backdrop { background:rgba(15,36,64,.5); }
+
+/* ===================== KSK DESKTOP SHELL (added 2026-08-06) ===================== */
+:root{ --ksk-sbw:238px; }
+#ksk-hamb{ display:none; }
+@media(min-width:901px){ html{ background:linear-gradient(to right,#0d2a47 var(--ksk-sbw), #f4f6f9 var(--ksk-sbw)) fixed; } } /* ksk-antiflash */
+.ksk-sb{ position:fixed; top:0; left:0; bottom:0; width:var(--ksk-sbw);
+  background:linear-gradient(180deg,#12395f,#0d2a47); color:#cdd9e6;
+  display:flex; flex-direction:column; z-index:200;
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif; }
+.ksk-sb .bnd{ padding:15px 18px; display:flex; align-items:baseline; gap:9px; border-bottom:1px solid rgba(255,255,255,.08); }
+.ksk-sb .bnd .lg{ background:#c9a227; color:#0d2a47; font-weight:800; font-size:15px; padding:4px 8px; border-radius:3px; letter-spacing:.5px; }
+.ksk-sb .bnd .tx{ font-size:10px; letter-spacing:2px; color:#8ba0b6; text-transform:uppercase; }
+.ksk-sb .nv{ display:flex; flex-direction:column; padding:10px 12px; gap:2px; background:transparent; position:static; top:auto; overflow:visible; border:0; box-shadow:none; }
+.ksk-sb .nv-a{ display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:8px;
+  color:#cdd9e6; font-size:14px; font-weight:600; text-decoration:none; white-space:nowrap; }
+.ksk-sb .nv-a:hover{ background:rgba(255,255,255,.07); color:#fff; }
+.ksk-sb .nv-a.on{ background:rgba(201,162,39,.18); color:#fff; box-shadow:inset 3px 0 0 #c9a227; }
+.ksk-sb .nv-a .ic{ width:18px; text-align:center; opacity:.9; font-size:15px; }
+.ksk-sb .foot{ margin-top:auto; padding:12px 16px; font-size:10.5px; line-height:1.4; color:#7f93a8; border-top:1px solid rgba(255,255,255,.08); }
+@media(min-width:901px){
+  body{ padding-left:var(--ksk-sbw); }
+  header{ padding-left:22px !important; }
+  main{ max-width:1500px !important; margin:0 auto !important; padding:20px 30px !important; }
+  main .t-title{ font-size:15px; }
+  .kpi{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) !important; }
+  .kpi b{ font-size:24px !important; }
+  #dlist,#rlist,#reglist,#enqlist,#qtnlist,#clist,#ilist{
+     display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:12px; align-items:start; }
+  #dlist>p,#rlist>p,#reglist>p,#enqlist>p,#qtnlist>p,#clist>p,#ilist>p{ grid-column:1 / -1; }
+  main table{ font-size:13.5px; }
+}
+@media(max-width:900px){
+  .ksk-sb{ transform:translateX(-100%); transition:transform .25s; width:252px; }
+  body.ksk-nav-open .ksk-sb{ transform:none; }
+  #ksk-hamb{ display:flex; position:fixed; top:9px; left:9px; z-index:201; width:38px; height:38px;
+    align-items:center; justify-content:center; background:#0d2a47; color:#fff; border:0; border-radius:8px; font-size:18px; cursor:pointer; }
+  header{ padding-left:56px !important; }
+}
+/* ===================== KSK DENSE SORTABLE TABLES ===================== */
+.tblwrap{ background:#fff; border:1px solid #e2e7ee; border-radius:10px; overflow:auto; max-height:calc(100vh - 160px); margin-bottom:14px; box-shadow:0 1px 3px rgba(15,36,64,.06); }
+table.dtbl{ width:100%; border-collapse:collapse; font-size:13px; }
+table.dtbl thead th{ position:sticky; top:0; background:#eef2f7; color:#3a4a5e; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; text-align:left; padding:9px 12px; border-bottom:2px solid #d6dee8; white-space:nowrap; z-index:1; user-select:none; }
+table.dtbl thead th.n{ text-align:right; }
+table.dtbl thead th:hover{ background:#e4eaf2; }
+table.dtbl tbody td{ padding:8px 12px; border-bottom:1px solid #f0f3f7; white-space:nowrap; vertical-align:middle; color:#233; }
+table.dtbl tbody td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+table.dtbl tbody tr:nth-child(even){ background:#fafbfd; }
+table.dtbl tbody tr.rowc{ cursor:pointer; }
+table.dtbl tbody tr.rowc:hover{ background:#eef4fb; }
+table.dtbl .sarr{ color:#c9a227; font-size:10px; }
+table.dtbl td .s2{ display:block; color:#889; font-size:11px; font-weight:400; margin-top:1px; white-space:normal; }
+table.dtbl td.wrap{ white-space:normal; min-width:200px; }
+table.dtbl td b{ color:#182b45; }
+</style>
+</head>
+<body>
+<button id="ksk-hamb" onclick="document.body.classList.toggle('ksk-nav-open')">☰</button>
+<aside class="ksk-sb">
+  <div class="bnd"><span class="lg">KSK</span><span class="tx">ERP 1.0</span></div>
+  <nav class="nv">
+    <a class="nv-a" href="./index.html"><span class="ic">▤</span><span>Dashboard</span></a>
+    <a class="nv-a on" href="./orders.html"><span class="ic">▦</span><span>Orders</span></a>
+    <a class="nv-a" href="./sales.html"><span class="ic">₹</span><span>Sales</span></a>
+    <a class="nv-a" href="./production.html"><span class="ic">⚙</span><span>Production</span></a>
+    <a class="nv-a" href="./masters.html"><span class="ic">☰</span><span>Masters</span></a>
+    <a class="nv-a" href="./kartavya.html"><span class="ic">✓</span><span>Task List</span></a>
+    <a class="nv-a" href="./ddr.html"><span class="ic">▤</span><span>Daily Report</span></a>
+  </nav>
+  <div class="foot">KSK Engineering Industries Pvt. Ltd.</div>
+</aside>
+
+<header>
+  <a href="./index.html">←</a>
+  <h1>Orders <small>Pending Order Register · KSK ERP 1.0</small></h1>
+  <div class="chip" id="who"></div>
+</header>
+<nav id="nav"></nav>
+<main id="main"><p class="muted" style="padding:30px;text-align:center">Loading…</p></main>
+<div id="toast"></div>
+<dialog id="dlg"></dialog>
+
+<script>
+const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
+const $ = s => document.querySelector(s);
+let ME = null, TAB = 'pending', REG = [], REGF = 'all';
+const esc = t => (t??'').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = d => d ? new Date(d+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}) : '—';
+const today = () => new Date().toISOString().slice(0,10);
+const num = n => (n==null||n==='') ? '—' : Number(n).toLocaleString('en-IN');
+const money = n => (n==null) ? '—' : '₹' + Number(n).toLocaleString('en-IN',{maximumFractionDigits:0});
+const days = d => d ? Math.round((new Date(d+'T00:00') - new Date(today()+'T00:00'))/864e5) : null;
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
+async function rpc(fn, args){ const {data,error} = await sb.rpc(fn,args); if(error){ toast(error.message); throw error; } return data; }
+async function q(view, mod){ let x = sb.from(view).select('*'); if(mod) x = mod(x); const {data,error} = await x; if(error){ toast(error.message); return []; } return data; }
+const isAdmin = () => ME.role==='ADMIN' || ME.role==='DIRECTOR';
+
+/* ===== KSK sortable dense-table engine ===== */
+const KSKT={};
+function kskDraw(id){
+  const t=KSKT[id]; if(!t)return; const tb=document.querySelector('#'+id+' tbody'); if(!tb)return;
+  let rows=t.rows.slice(); const sc=t.cols[t.sort.col];
+  if(sc){ rows.sort((a,b)=>{
+    let x=sc.sort?sc.sort(a):(sc.get?sc.get(a):''), y=sc.sort?sc.sort(b):(sc.get?sc.get(b):'');
+    if(sc.num){ x=(x==null||x==='')?-Infinity:Number(x); y=(y==null||y==='')?-Infinity:Number(y); return (x-y)*t.sort.dir; }
+    return String(x==null?'':x).localeCompare(String(y==null?'':y),undefined,{numeric:true})*t.sort.dir;
+  }); }
+  tb.innerHTML = rows.length ? rows.map(r=>{
+    const oc=t.onRow?` class="rowc" onclick="${t.onRow(r)}"`:'';
+    return '<tr'+oc+'>'+t.cols.map(c=>`<td class="${c.num?'n':''} ${c.cls?c.cls(r):''}">${c.cell?c.cell(r):esc(c.get?c.get(r):'')}</td>`).join('')+'</tr>';
+  }).join('') : `<tr><td colspan="${t.cols.length}" style="text-align:center;color:#889;padding:16px">Nothing to show.</td></tr>`;
+  t.cols.forEach((c,i)=>{ const s=document.querySelector('#'+id+' th[data-c="'+i+'"] .sarr'); if(s) s.textContent=t.sort.col===i?(t.sort.dir>0?'▲':'▼'):''; });
+}
+function kskSortBy(id,i){ const t=KSKT[id]; if(!t||t.cols[i].noSort)return; if(t.sort.col===i)t.sort.dir*=-1; else{t.sort.col=i;t.sort.dir=t.cols[i].num?-1:1;} kskDraw(id); }
+function kskTable(id,cols,rows,opts){
+  opts=opts||{}; KSKT[id]={cols,rows,onRow:opts.onRow,sort:{col:(opts.sortCol==null?-1:opts.sortCol),dir:opts.sortDir||1}};
+  const head=cols.map((c,i)=>`<th data-c="${i}" class="${c.num?'n':''}" ${c.noSort?'':`onclick="kskSortBy('${id}',${i})" style="cursor:pointer"`} title="${c.noSort?'':'Click to sort'}">${esc(c.label)} <span class="sarr"></span></th>`).join('');
+  setTimeout(()=>kskDraw(id),0);
+  return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
+}
+
+const TABS = [['pending','Pending'],['ext','Extensions'],['reg','Register'],['cxl','Cancelled / Arbitration'],['new','New PO'],['value','Value']];
+function drawNav(){
+  const t = isAdmin() ? TABS : TABS.filter(x=>!['new','value'].includes(x[0]));
+  $('#nav').innerHTML = t.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
+}
+function go(t){ TAB=t; drawNav(); render[t](); }
+
+// ---- register filter ----
+function regFilter(f){ REGF=f; regDraw(); }
+function regDraw(){
+  const term = ($('#rq')?.value || '').trim().toLowerCase();
+  const hit = p => !term || [p.customer,p.po_no,p.external_po_no,p.zone,p.consignee]
+      .some(v => (v||'').toString().toLowerCase().includes(term));
+  const pass = p => REGF==='all' ? true
+    : REGF==='open'    ? p.pending_lines>0
+    : REGF==='late'    ? p.overdue_lines>0
+    : REGF==='govt'    ? p.po_type==='GOVT'
+    : REGF==='pvt'     ? p.po_type==='PVT'
+    : REGF==='derived' ? derived(p) : true;
+  ['all','open','late','govt','pvt','der'].forEach(k=>{
+    const b=$('#f-'+k); if(b) b.classList.remove('dark');
+  });
+  const btn = $('#f-' + (REGF==='derived'?'der':REGF)); if(btn) btn.classList.add('dark');
+  const list = REG.filter(p=>hit(p)&&pass(p));
+  const cols=[
+    {label:'Customer', cls:()=>'wrap', get:p=>p.customer,
+      cell:p=>`<b>${esc(p.customer)}</b><span class="s2">${esc(p.po_no)} · ext ${esc(p.external_po_no||'—')}</span>`},
+    {label:'Zone', get:p=>p.zone||'', cell:p=>esc(p.zone||'—')},
+    {label:'Consignee', cls:()=>'wrap', get:p=>p.consignee||'', cell:p=>esc(p.consignee||'—')},
+    {label:'DP', sort:p=>p.dp_current||'9999-99-99', cell:p=>fmt(p.dp_current)},
+    {label:'Lines open', num:true, sort:p=>p.pending_lines, cell:p=>`${p.pending_lines}/${p.line_count}`},
+    {label:'Overdue', num:true, get:p=>p.overdue_lines, cell:p=>p.overdue_lines>0?`<span class="tag late">${p.overdue_lines}</span>`:'—'},
+    {label:'Type', get:p=>p.po_type, cell:p=>`<span class="tag ${p.po_type}">${p.po_type}</span>${derived(p)?' <span class="tag" style="background:#fff4e5;color:#8a5a00">SALES</span>':''}`},
+    {label:'Status', get:p=>p.status, cell:p=>p.status==='CANCELLED'?'<span class="tag cxl">CANCELLED / ARB.</span>':p.status!=='OPEN'?`<span class="tag info">${esc(p.status)}</span>`:'<span class="tag ok">OPEN</span>'}
+  ];
+  $('#reglist').innerHTML =
+    `<p class="muted" style="margin:8px 4px">Showing ${list.length} of ${REG.length} POs · click a column to sort</p>` +
+    kskTable('t-reg', cols, list, {onRow:p=>`openPO('${p.id}')`, sortCol:3, sortDir:1});
+}
+
+// ---- cards ----
+function dpTag(dp, complete){
+  if(complete) return '<span class="tag ok">COMPLETE</span>';
+  const d = days(dp);
+  if(d===null) return '<span class="tag info">NO DP</span>';
+  if(d < 0) return `<span class="tag late">OVERDUE ${-d}d</span>`;
+  if(d <= 30) return `<span class="tag soon">DUE ${d}d</span>`;
+  return `<span class="tag ok">${d}d left</span>`;
+}
+const derived = p => p.qty_basis === 'DISPATCH_DERIVED';
+function poCard(p){
+  const worst = p.overdue_lines>0;
+  return `<div class="card clickable" onclick="openPO('${p.id}')"><div class="row">
+    <div class="grow">
+      <div class="t-title">${esc(p.customer)}</div>
+      <div class="t-sub">${p.po_no} · ext ${esc(p.external_po_no||'—')}${p.zone?' · '+esc(p.zone):''}
+        <br>${esc(p.consignee||'consignee not set')} · DP ${fmt(p.dp_current)}
+        ${p.inspection_agency?'<br>Inspection: '+esc(p.inspection_agency):''}</div>
+    </div>
+    <div style="text-align:right">
+      <span class="tag ${p.po_type}">${p.po_type}</span><br>
+      <span style="font-size:11px;color:#889">${p.pending_lines}/${p.line_count} lines open</span>
+    </div></div>
+    <div class="row" style="margin-top:8px">
+      ${derived(p)
+        ? `<span class="tag" style="background:#fff4e5;color:#8a5a00">FY26-27 SALES RECORD — qty from dispatches, not a PO</span>`
+        : (worst?`<span class="tag late">${p.overdue_lines} line${p.overdue_lines>1?'s':''} past DP</span>`:dpTag(p.dp_current, p.pending_lines==0))}
+      ${p.status==='CANCELLED'?'<span class="tag cxl">CANCELLED / ARBITRATION</span>':p.status!=='OPEN'?`<span class="tag info">${p.status}</span>`:''}
+    </div></div>`;
+}
+function lineRow(l, admin){
+  const pct = l.qty_ordered>0 ? Math.min(100, Math.round(100*l.qty_dispatched/l.qty_ordered)) : 0;
+  // A closed line still owes a balance on paper. Show it, and show why it's settled —
+  // a line that reads "72,612 owed" with no explanation is worse than one that's late.
+  return `<div class="card" style="box-shadow:none;border:1px solid ${l.closed?'#ffd699':'#eef1f5'};margin-bottom:8px;${l.closed?'background:#fffdf8':''}">
+    <div class="row"><div class="grow">
+      <div class="t-title">${esc(l.item)}</div>
+      ${l.consignee?`<div class="t-sub" style="color:#334">▸ ${esc(l.consignee)}${l.schedule_sr?` <span class="muted">Sr ${esc(l.schedule_sr)}</span>`:''}</div>`:''}
+      <div class="t-sub">${esc(l.drawing_no||'no drawing')} · ${num(l.qty_dispatched)} / ${num(l.qty_ordered)} ${esc(l.uom||'')}
+        · bal <b>${num(l.balance)}</b><br>DP ${fmt(l.dp_current)}${l.dp_current!==l.dp_original?` <span class="muted">(orig ${fmt(l.dp_original)})</span>`:''}
+        · invoice: ${esc(l.invoice_status||'PENDING')}</div>
+    </div>${l.closed?'<span class="tag closed">CLOSED</span>':dpTag(l.dp_current, l.complete)}</div>
+    ${l.closed?`<div class="t-sub" style="color:#6b4700;background:#fff4e5;border:1px solid #ffd699;border-radius:8px;padding:8px;margin-top:8px">
+      <b>Settled without a dispatch record.</b> ${esc(l.closed_reason||'')}
+      ${l.closed_by_name?`<br><span class="muted">Closed by ${esc(l.closed_by_name)} · ${fmt(l.closed_on)}</span>`:''}</div>`
+    :`<div class="bar"><i style="width:${pct}%"></i></div>`}
+    ${admin?`<div class="row" style="margin-top:9px">
+      ${l.closed?`<button class="a" onclick="reopenLine('${l.id}')">Re-open</button>`
+      :`<button class="a gold" onclick="addDispatch('${l.id}', ${l.balance})">+ Dispatch</button>
+        <button class="a" onclick="extendDP(null,'${l.id}','${esc(l.item)}')">⟳ DP extension</button>
+        <button class="a" onclick="invoiceSet('${l.id}')">Invoice…</button>
+        ${!l.complete?`<button class="a" onclick="closeLine('${l.id}','${esc(l.item)}')">Close…</button>`:''}`}
+    </div>`:''}</div>`;
+}
+// Closing is not deleting. It records that the line is settled and why, keeps the
+// balance visible, and can be undone.
+function closeLine(lineId, name){
+  $('#dlg').innerHTML = `<div class="t-title">Close this line without a dispatch</div>
+    <p class="muted" style="margin-top:3px">${esc(name)}</p>
+    <p class="muted" style="margin-top:6px">Use this when the material went out but the proof sits outside what this system holds — a delivery before 1 Apr 2026, for instance. The balance stays on the line; the reason goes on the record.</p>
+    <label>Why is this settled?</label>
+    <textarea id="c-why" rows="3" placeholder="e.g. Delivered Dec 2025; DP predates the FY window."></textarea>
+    <label>Settled on</label><input id="c-on" type="date" value="${today()}">
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="c-ok">Close line</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#c-ok').onclick = async ()=>{
+    if(!$('#c-why').value.trim()) return toast('A closure needs a reason');
+    await rpc('line_close', { p_line_id:lineId, p_reason:$('#c-why').value.trim(), p_on:$('#c-on').value||null });
+    toast('Line closed'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+async function reopenLine(lineId){
+  if(!confirm('Re-open this line? It goes back into the pending and LD lens.')) return;
+  await rpc('line_reopen', { p_line_id:lineId });
+  toast('Re-opened'); $('#dlg').close(); render[TAB]();
+}
+
+// ---- pending (line-level sortable table) ----
+let PEND_LINES=[], PENDF='all';
+function pendFilter(f){
+  PENDF=f;
+  ['all','od','soon','nodp'].forEach(k=>{ const b=$('#pf-'+k); if(b) b.classList.remove('dark'); });
+  const ab=$('#pf-'+f); if(ab) ab.classList.add('dark');
+  let rows=PEND_LINES;
+  if(f==='od') rows=rows.filter(l=>l.dp_current && l.dp_current<today());
+  else if(f==='soon') rows=rows.filter(l=>l._d!==null && l._d>=0 && l._d<=30);
+  else if(f==='nodp') rows=rows.filter(l=>!l.dp_current);
+  const cols=[
+    {label:'Customer', cls:()=>'wrap', get:l=>l._po.customer,
+      cell:l=>`<b>${esc(l._po.customer)}</b><span class="s2">${esc(l._po.po_no)}${l._po.zone?' · '+esc(l._po.zone):''}${l._po.consignee?' · '+esc(l._po.consignee):''}</span>`},
+    {label:'Item', cls:()=>'wrap', get:l=>l.item,
+      cell:l=>`${esc(l.item)}<span class="s2">${esc(l.drawing_no||'no drawing')}${l.schedule_sr?' · Sr '+esc(l.schedule_sr):''}</span>`},
+    {label:'Balance', num:true, get:l=>l.balance,
+      cell:l=>`<b>${num(l.balance)}</b> ${esc(l.uom||'')}<span class="s2">of ${num(l.qty_ordered)}</span>`},
+    {label:'DP', sort:l=>l.dp_current||'9999-99-99', cell:l=>fmt(l.dp_current)},
+    {label:'Status', sort:l=>l._d==null?1e9:l._d, cell:l=>dpTag(l.dp_current,false)},
+    {label:'Type', get:l=>l._po.po_type, cell:l=>`<span class="tag ${l._po.po_type}">${l._po.po_type}</span>`}
+  ];
+  $('#pendtbl').innerHTML = kskTable('t-pend', cols, rows, {onRow:l=>`openPO('${l._po.id}')`, sortCol:4, sortDir:1});
+}
+
+// ---- tabs ----
+const render = {
+  async pending(){
+    const [pos, lines] = await Promise.all([
+      q('v_pos', x=>x.eq('status','OPEN')),
+      q('v_po_lines', x=>x.eq('complete', false))
+    ]);
+    const byPo = Object.fromEntries(pos.map(p=>[p.id,p]));
+    PEND_LINES = lines.map(l=>({...l, _po:byPo[l.po_id]||{}, _d:days(l.dp_current)})).filter(l=>l._po.id);
+    const od = PEND_LINES.filter(l=>l.dp_current && l.dp_current < today());
+    const soon = PEND_LINES.filter(l=>l._d!==null && l._d>=0 && l._d<=30);
+    const noDP = PEND_LINES.filter(l=>!l.dp_current);
+    $('#main').innerHTML = `<div class="kpi">
+        <div class="${od.length?'alert':''}"><b>${od.length}</b><span>lines past DP</span></div>
+        <div><b>${soon.length}</b><span>due ≤30 days</span></div>
+        <div><b>${PEND_LINES.length}</b><span>lines open</span></div>
+        ${noDP.length?`<div class="alert"><b>${noDP.length}</b><span>no DP set</span></div>`:''}
+      </div>
+      <div class="row" style="margin:2px 2px 10px;flex-wrap:wrap">
+        <button class="a" id="pf-all" onclick="pendFilter('all')">All open</button>
+        <button class="a" id="pf-od" onclick="pendFilter('od')">Past DP</button>
+        <button class="a" id="pf-soon" onclick="pendFilter('soon')">Due ≤30d</button>
+        <button class="a" id="pf-nodp" onclick="pendFilter('nodp')">No DP</button>
+        <span class="muted" style="margin-left:auto;align-self:center">Click a column to sort</span>
+      </div>
+      <div id="pendtbl"></div>`;
+    pendFilter(PENDF||'all');
+  },
+  async ext(){
+    const [pos, unp, pend, granted, ld] = await Promise.all([
+      q('v_pos'),
+      q('v_unprotected_overdue', x=>x.order('days_overdue',{ascending:false})),
+      q('v_ext_pending', x=>x.order('days_waiting',{ascending:false})),
+      q('v_dp_extensions', x=>x.not('granted_on','is',null).order('granted_on',{ascending:false})),
+      isAdmin() ? q('v_ld_exposure') : Promise.resolve([])
+    ]);
+    const byPo = Object.fromEntries(pos.map(p=>[p.id,p]));
+    const ldByLine = Object.fromEntries(ld.map(x=>[x.line_id,x]));
+    const ldTotal = ld.reduce((s,x)=>s+Number(x.ld_amount||0),0);
+    const who = id => byPo[id] ? `${esc(byPo[id].customer)} <span class="muted">${byPo[id].po_no}</span>` : '—';
+
+    // 1. Overdue with NO extension applied for — live LD risk, no cover.
+    const unpCols=[
+      {label:'Customer', cls:()=>'wrap', get:l=>byPo[l.po_id]?.customer||'',
+        cell:l=>`<b>${esc(byPo[l.po_id]?.customer||'—')}</b><span class="s2">${esc(byPo[l.po_id]?.po_no||'')}</span>`},
+      {label:'Item', cls:()=>'wrap', get:l=>l.item, cell:l=>`${esc(l.item)}<span class="s2">${esc(l.drawing_no||'')}</span>`},
+      {label:'Balance', num:true, get:l=>l.balance, cell:l=>`<b>${num(l.balance)}</b> ${esc(l.uom||'')}<span class="s2">of ${num(l.qty_ordered)}</span>`},
+      {label:'DP', sort:l=>l.dp_current||'', cell:l=>fmt(l.dp_current)},
+      {label:'Overdue', num:true, get:l=>l.days_overdue, cell:l=>`<span class="tag late">${l.days_overdue}d</span>`}
+    ].concat(isAdmin()?[{label:'Action', noSort:true, cell:l=>`<button class="a gold" onclick="extendDP(null,'${l.line_id}','${esc(l.item)}')">⟳ Apply</button>`}]:[]);
+    const unpBlock = !unp.length
+      ? '<p class="muted" style="margin:0 4px 10px">Every overdue line has an extension on record. ✓</p>'
+      : kskTable('t-unp', unpCols, unp, {sortCol:4, sortDir:-1});
+
+    // 2. Applied for, no reply yet.
+    const pendCols=[
+      {label:'Customer', cls:()=>'wrap', get:e=>byPo[e.po_id]?.customer||'',
+        cell:e=>`<b>${esc(byPo[e.po_id]?.customer||'—')}</b><span class="s2">${esc(byPo[e.po_id]?.po_no||'')}</span>`},
+      {label:'Scope', get:e=>e.line_id?'Line':'Whole PO', cell:e=>e.line_id?'Line-level':'<b>Whole PO</b>'},
+      {label:'Applied', sort:e=>e.applied_on||'', cell:e=>fmt(e.applied_on)},
+      {label:'Asked DP', sort:e=>e.dp_requested||'', cell:e=>fmt(e.dp_requested)},
+      {label:'Waiting', num:true, get:e=>e.days_waiting, cell:e=>`<span class="tag ${e.days_waiting>21?'late':'soon'}">${e.days_waiting}d</span>`}
+    ].concat(isAdmin()?[{label:'Action', noSort:true, cell:e=>`<button class="a dark" onclick="grantExt('${e.id}','${fmt(e.dp_requested)}','${e.dp_requested}')">✓ Grant</button>`}]:[]);
+    const pendBlock = !pend.length
+      ? '<p class="muted" style="margin:0 4px 10px">Nothing awaiting a reply.</p>'
+      : kskTable('t-extpend', pendCols, pend, {sortCol:4, sortDir:-1});
+
+    // 3. Granted — history, with LD exposure for Director/Admin.
+    const grantBlock = !granted.length
+      ? '<p class="muted" style="margin:0 4px 10px">No extensions granted yet.</p>'
+      : `<table><tr><th>PO / scope</th><th>Applied</th><th>Granted</th><th>Revised DP</th><th>LD</th>${isAdmin()?'<th class="n">Exposure</th>':''}</tr>
+         ${granted.map(e=>{
+           const x = e.line_id ? ldByLine[e.line_id] : null;
+           return `<tr><td>${who(e.po_id)}<br><span class="muted">${e.line_id?'line':'whole PO'}</span></td>
+             <td>${fmt(e.applied_on)}</td><td>${fmt(e.granted_on)}</td><td><b>${fmt(e.revised_dp)}</b></td>
+             <td>${e.ld_applicable
+                  ? `<span class="tag late">LD ${e.ld_rate_pct_per_week}%/wk · cap ${e.ld_cap_pct}%</span>${e.ld_clause?'<br><span class="muted">'+esc(e.ld_clause)+'</span>':''}`
+                  : '<span class="tag ok">clean</span>'}</td>
+             ${isAdmin()?`<td class="n">${x?`<b>${money(x.ld_amount)}</b><br><span class="muted">${x.ld_pct}% · ${x.weeks_late}w late</span>`:'—'}</td>`:''}</tr>`;
+         }).join('')}</table>`;
+
+    $('#main').innerHTML = `<div class="kpi">
+        <div class="${unp.length?'alert':''}"><b>${unp.length}</b><span>overdue, no extension</span></div>
+        <div><b>${pend.length}</b><span>awaiting reply</span></div>
+        <div><b>${granted.length}</b><span>granted</span></div>
+        ${isAdmin()&&ld.length?`<div class="alert"><b style="font-size:15px">${money(ldTotal)}</b><span>LD exposure</span></div>`:''}
+      </div>
+      <h2>Overdue with no extension — LD running, no cover</h2>${unpBlock}
+      <h2>Applied for — awaiting reply</h2>${pendBlock}
+      <h2>Granted</h2>${grantBlock}
+      ${isAdmin()?`<p class="muted" style="margin:10px 4px">LD exposure is an estimate: value of the undelivered balance × rate per week from the <b>original</b> DP, capped. Money is visible to Director &amp; Admin only — enforced in the database.</p>`:''}`;
+  },
+  async cxl(){
+    const pos = await q('v_pos', x=>x.eq('status','CANCELLED').order('po_no'));
+    const ids = pos.map(p=>p.id);
+    const [lines, mon] = ids.length ? await Promise.all([
+      q('v_po_lines', x=>x.in('po_id', ids)),
+      isAdmin() ? q('v_po_money', x=>x.in('po_id', ids)) : Promise.resolve([])
+    ]) : [[],[]];
+    const rate = Object.fromEntries(mon.map(m=>[m.line_id, Number(m.rate)]));
+    const agg = p => {
+      const ls = lines.filter(l=>l.po_id===p.id);
+      return { n:ls.length,
+        ordered: ls.reduce((s,l)=>s+Number(l.qty_ordered||0),0),
+        disp: ls.reduce((s,l)=>s+Number(l.qty_dispatched||0),0),
+        bal: ls.reduce((s,l)=>s+Math.max(0,Number(l.balance||0)),0),
+        val: ls.reduce((s,l)=>s+Math.max(0,Number(l.balance||0))*(rate[l.id]||0),0),
+        uom: ls[0]?.uom||'' };
+    };
+    const rows = pos.map(p=>({...p, _a:agg(p)}));
+    const lastNote = p => { const m=(p.remarks||'').split(' | ').filter(x=>/cancel|arbitrat|status/i.test(x)); return m.length?m[m.length-1]:''; };
+    const cols=[
+      {label:'Customer', cls:()=>'wrap', get:p=>p.customer,
+        cell:p=>`<b>${esc(p.customer)}</b><span class="s2">${esc(p.po_no)} · ext ${esc(p.external_po_no||'—')}</span>`},
+      {label:'PO date', sort:p=>p.external_po_date||'', cell:p=>fmt(p.external_po_date)},
+      {label:'Ordered', num:true, get:p=>p._a.ordered, cell:p=>`${num(p._a.ordered)} ${esc(p._a.uom)}`},
+      {label:'Supplied', num:true, get:p=>p._a.disp, cell:p=>num(p._a.disp)},
+      {label:'Unsupplied', num:true, get:p=>p._a.bal, cell:p=>`<b>${num(p._a.bal)}</b>`}
+    ].concat(isAdmin()?[{label:'Unsupplied value', num:true, get:p=>p._a.val, cell:p=>money(p._a.val)}]:[]).concat([
+      {label:'Note', cls:()=>'wrap', get:p=>lastNote(p), cell:p=>`<span class="s2" style="white-space:normal">${esc(lastNote(p))}</span>`},
+      {label:'Type', get:p=>p.po_type, cell:p=>`<span class="tag ${p.po_type}">${p.po_type}</span>`}
+    ]);
+    $('#main').innerHTML = `<div class="kpi">
+        <div class="alert"><b>${rows.length}</b><span>orders cancelled / in arbitration</span></div>
+        ${isAdmin()?`<div><b style="font-size:15px">${money(rows.reduce((s,p)=>s+p._a.val,0))}</b><span>unsupplied value</span></div>`:''}
+      </div>
+      <p class="muted" style="margin:2px 4px 10px">These orders are kept off the Pending, overdue and LD lenses. Their lines are closed with the reason recorded; the unsupplied quantity stays visible here for any claim or arbitration.</p>
+      ${rows.length ? kskTable('t-cxl', cols, rows, {onRow:p=>`openPO('${p.id}')`, sortCol:0, sortDir:1}) : '<p class="muted">Nothing here.</p>'}`;
+  },
+  async reg(){
+    REG = await q('v_pos', x=>x.order('created_at',{ascending:false}));
+    $('#main').innerHTML = `
+      <div class="card" style="padding:10px 12px">
+        <input id="rq" placeholder="Search customer, PO no., their PO no., zone…" oninput="regDraw()" style="margin:0">
+        <div class="row" style="margin-top:8px;flex-wrap:wrap">
+          <button class="a" id="f-all"  onclick="regFilter('all')">All</button>
+          <button class="a" id="f-open" onclick="regFilter('open')">Has open lines</button>
+          <button class="a" id="f-late" onclick="regFilter('late')">Past DP</button>
+          <button class="a" id="f-govt" onclick="regFilter('govt')">Govt</button>
+          <button class="a" id="f-pvt"  onclick="regFilter('pvt')">Private</button>
+          <button class="a" id="f-der"  onclick="regFilter('derived')">Sales records</button>
+        </div>
+      </div><div id="reglist"></div>`;
+    regDraw();
+  },
+  async new(){
+    $('#main').innerHTML = `<div class="card">
+      <div class="t-title">New purchase order</div>
+      <p class="muted" style="margin-top:3px">The internal serial (PO/KSK/26-27/####) is issued by the database. Add the lines after saving.</p>
+      <div class="row"><div class="grow"><label>Type</label>
+        <select id="p-type" onchange="document.getElementById('zone-wrap').style.display=this.value==='GOVT'?'block':'none'">
+          <option value="GOVT">Government</option><option value="PVT">Private</option></select></div>
+        <div class="grow" id="zone-wrap"><label>Railway zone (required for Govt)</label><input id="p-zone" placeholder="e.g. SECR"></div></div>
+      <label>Customer</label><input id="p-cust" placeholder="e.g. PCMM Bilaspur / Larsen &amp; Toubro">
+      <div class="row"><div class="grow"><label>Their PO no.</label><input id="p-ext" placeholder="e.g. 06260094201153"></div>
+        <div class="grow"><label>Their PO date</label><input id="p-extd" type="date"></div></div>
+      <label>Consignee</label><input id="p-cons" placeholder="Where it ships">
+      <div class="row"><div class="grow"><label>Inspection agency</label><input id="p-insp" placeholder="RITES / Intertek / BV"></div>
+        <div class="grow"><label>DP (delivery period)</label><input id="p-dp" type="date"></div></div>
+      <label>Remarks</label><textarea id="p-rem" rows="2" placeholder="Optional"></textarea>
+      <button class="a dark" style="width:100%;margin-top:12px" onclick="createPO()">Create PO</button>
+    </div>`;
+  },
+  async value(){
+    const [pos, lines, mon] = await Promise.all([ q('v_pos'), q('v_po_lines'), q('v_po_money') ]);
+    if(!mon.length){ $('#main').innerHTML = '<p class="muted" style="padding:20px;text-align:center">No rates recorded yet.</p>'; return; }
+    const byPo = Object.fromEntries(pos.map(p=>[p.id,p]));
+    const byLine = Object.fromEntries(lines.map(l=>[l.id,l]));
+    const agg = {};
+    mon.forEach(m=>{
+      const l = byLine[m.line_id]; if(!l) return;
+      const a = (agg[m.po_id] ||= {value:0, pending:0});
+      a.value += Number(m.line_value||0);
+      a.pending += Number(m.rate||0) * Number(l.balance||0);
+    });
+    const rows = Object.entries(agg).map(([id,a])=>({p:byPo[id], ...a})).filter(r=>r.p)
+      .sort((x,y)=>y.pending-x.pending);
+    const tot = rows.reduce((s,r)=>s+r.value,0), pend = rows.reduce((s,r)=>s+r.pending,0);
+    $('#main').innerHTML = `<div class="kpi">
+        <div><b style="font-size:15px">${money(tot)}</b><span>order book</span></div>
+        <div class="alert"><b style="font-size:15px">${money(pend)}</b><span>yet to dispatch</span></div>
+        <div><b style="font-size:15px">${money(tot-pend)}</b><span>dispatched</span></div>
+      </div>
+      <h2>Value by PO <span class="muted" style="font-weight:400;text-transform:none">· Director &amp; Admin only, enforced in the database · click a column to sort</span></h2>
+      ${kskTable('t-value', [
+        {label:'PO', cls:()=>'wrap', get:r=>r.p.customer, cell:r=>`<b>${esc(r.p.customer)}</b><span class="s2">${esc(r.p.po_no)}</span>`},
+        {label:'Order value', num:true, get:r=>r.value, cell:r=>money(r.value)},
+        {label:'Dispatched', num:true, get:r=>r.value-r.pending, cell:r=>money(r.value-r.pending)},
+        {label:'Pending', num:true, get:r=>r.pending, cell:r=>`<b>${money(r.pending)}</b>`}
+      ], rows, {sortCol:3, sortDir:-1})}`;
+  }
+};
+
+// ---- PO detail ----
+async function openPO(id){
+  const [pos, lines, disp, ext] = await Promise.all([
+    q('v_pos', x=>x.eq('id',id)),
+    q('v_po_lines', x=>x.eq('po_id',id)),
+    q('v_dispatches', x=>x.order('dispatch_date',{ascending:false})),
+    q('v_dp_extensions', x=>x.eq('po_id',id).order('granted_on',{ascending:false}))
+  ]);
+  const p = pos[0]; if(!p) return toast('Not found');
+  const admin = isAdmin();
+  const lineIds = new Set(lines.map(l=>l.id));
+  const ds = disp.filter(d=>lineIds.has(d.line_id));
+  const nameOf = lid => (lines.find(l=>l.id===lid)||{}).item || '';
+  $('#dlg').innerHTML = `
+    <div class="row"><div class="grow"><div class="t-title">${esc(p.customer)}</div>
+      <div class="t-sub">${p.po_no} · their no. ${esc(p.external_po_no||'—')} of ${fmt(p.external_po_date)}
+        ${p.zone?'<br>Zone: '+esc(p.zone):''}<br>Consignee: ${esc(p.consignee||'—')}
+        <br>Inspection: ${esc(p.inspection_agency||'—')} · PO-level DP: ${fmt(p.dp_current)}
+        ${p.remarks?'<br>'+esc(p.remarks):''}
+        <br>Won against: ${p.qtn_no?`<b>${esc(p.qtn_no)}</b>${p.enq_no?` · enq ${esc(p.enq_no)}`:''}`:'<span style="color:#a96b00">not recorded</span>'}
+        ${admin?` <button class="a" style="padding:2px 7px;font-size:11px" onclick="linkQtn('${p.id}','${esc(p.qtn_no||'')}')">${p.qtn_no?'change':'tag quotation'}</button>`:''}
+        </div></div>
+      <span class="tag ${p.po_type}">${p.po_type}</span></div>
+    ${derived(p)?`<div class="card" style="box-shadow:none;background:#fff4e5;border:1px solid #ffd699;margin-top:10px">
+      <div class="t-title" style="color:#8a5a00">FY26-27 sales record — balances are not meaningful</div>
+      <div class="t-sub" style="color:#6b4700">The ordered quantity here was set <b>equal to what was dispatched this financial year</b>, because the PO document wasn't read (or doesn't exist). Balance shows zero <b>by construction</b> — that is not evidence the order is complete. Any delivery before 1 Apr 2026 is excluded by the FY rule and is invisible here. This PO has no DP, so it can never appear in the overdue or LD lens.</div>
+    </div>`:''}
+    ${admin?`<div class="row" style="margin-top:10px">
+      <button class="a" onclick="addLine('${p.id}')">+ Line</button>
+      <button class="a" onclick="extendDP('${p.id}',null,'whole PO')">⟳ DP extension (whole PO)</button>
+      ${p.status==='OPEN'?`<button class="a" onclick="closePO('${p.id}')">Close PO</button>
+      <button class="a" style="border-color:#b33;color:#b33" onclick="cancelPO('${p.id}')">Cancel / Arbitration</button>`:''}
+    </div>`:''}
+    <h2>Lines (${lines.length})</h2>
+    ${lines.map(l=>lineRow(l, admin)).join('') || '<p class="muted">No lines yet.</p>'}
+    ${ext.length?`<h2>DP extensions</h2><table><tr><th>Applied</th><th>Granted</th><th>Revised DP</th><th>Scope</th><th>LD</th></tr>
+      ${ext.map(e=>`<tr><td>${fmt(e.applied_on)}</td>
+        <td>${e.granted_on?fmt(e.granted_on):(admin?`<button class="a" onclick="dlg.close();grantExt('${e.id}','${fmt(e.revised_dp)}','${e.revised_dp}')">record grant</button>`:'<span class="tag soon">pending</span>')}</td>
+        <td>${fmt(e.revised_dp)}</td><td>${e.line_id?esc(nameOf(e.line_id)):'whole PO'}</td>
+        <td>${e.granted_on ? (e.ld_applicable?`<span class="tag late">LD ${e.ld_rate_pct_per_week}%/wk · cap ${e.ld_cap_pct}%</span>`:'<span class="tag ok">clean</span>') : '—'}</td></tr>`).join('')}</table>`:''}
+    ${ds.length?`<h2>Dispatches (${ds.length})</h2><table><tr><th>Date</th><th>Item</th><th class="n">Qty</th><th>Ref</th></tr>
+      ${ds.map(d=>`<tr><td>${fmt(d.dispatch_date)}</td><td>${esc(nameOf(d.line_id))}</td><td class="n">${num(d.qty)}</td><td>${esc(d.ref||'—')}</td></tr>`).join('')}</table>`:''}
+    <button class="a" style="width:100%;margin-top:14px" onclick="dlg.close()">Close</button>`;
+  $('#dlg').showModal();
+}
+
+// ---- actions (every write goes through a guarded RPC) ----
+async function createPO(){
+  const type = $('#p-type').value, cust = $('#p-cust').value.trim();
+  if(!cust) return toast('Customer required');
+  if(type==='GOVT' && !$('#p-zone').value.trim()) return toast('Railway zone required for a Govt PO');
+  const no = await rpc('po_create', { p_type:type, p_customer:cust,
+    p_ext_no:$('#p-ext').value||null, p_ext_date:$('#p-extd').value||null,
+    p_zone:type==='GOVT'?$('#p-zone').value:null, p_consignee:$('#p-cons').value||null,
+    p_inspection:$('#p-insp').value||null, p_dp:$('#p-dp').value||null,
+    p_remarks:$('#p-rem').value||null });
+  toast('Created '+no); go('reg');
+}
+function addLine(poId){
+  $('#dlg').innerHTML = `<div class="t-title">Add line</div>
+    <label>Item</label><input id="l-item" placeholder="e.g. Fish Plate T-5916 with fittings">
+    <div class="row"><div class="grow"><label>Drawing no.</label><input id="l-drw" placeholder="T-5916"></div>
+      <div class="grow"><label>UOM</label><input id="l-uom" placeholder="Sets / Nos / MT"></div></div>
+    <div class="row"><div class="grow"><label>Qty ordered</label><input id="l-qty" type="number" step="0.01"></div>
+      <div class="grow"><label>Rate (₹) — optional</label><input id="l-rate" type="number" step="0.01"></div></div>
+    <label>DP for this line</label><input id="l-dp" type="date">
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="l-ok">Add line</button>
+      <button class="a" onclick="openPO('${poId}')">Back</button></div>`;
+  $('#l-ok').onclick = async ()=>{
+    if(!$('#l-item').value.trim() || !$('#l-qty').value) return toast('Item and qty required');
+    await rpc('po_line_add', { p_po_id:poId, p_item:$('#l-item').value, p_drawing:$('#l-drw').value||null,
+      p_uom:$('#l-uom').value||null, p_qty:Number($('#l-qty').value),
+      p_rate:$('#l-rate').value?Number($('#l-rate').value):null, p_dp:$('#l-dp').value||null });
+    toast('Line added'); openPO(poId);
+  };
+  $('#dlg').showModal();
+}
+function addDispatch(lineId, balance){
+  $('#dlg').innerHTML = `<div class="t-title">Record dispatch</div>
+    <p class="muted" style="margin-top:3px">Balance on this line: <b>${num(balance)}</b>. The database refuses more than the balance.</p>
+    <div class="row"><div class="grow"><label>Date</label><input id="d-date" type="date" value="${today()}"></div>
+      <div class="grow"><label>Qty</label><input id="d-qty" type="number" step="0.01" max="${balance}"></div></div>
+    <label>Reference (invoice / RR / challan)</label><input id="d-ref" placeholder="Optional">
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="d-ok">Save dispatch</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#d-ok').onclick = async ()=>{
+    const qv = Number($('#d-qty').value); if(!qv) return toast('Qty required');
+    await rpc('dispatch_add', { p_line_id:lineId, p_date:$('#d-date').value, p_qty:qv, p_ref:$('#d-ref').value||null });
+    toast('Dispatch recorded'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+// Apply for an extension. LD terms are NOT set here — they arrive with the grant letter.
+function extendDP(poId, lineId, what){
+  $('#dlg').innerHTML = `<div class="t-title">Apply for DP extension — ${esc(what)}</div>
+    <p class="muted" style="margin-top:3px">This logs the application only. The DP does not move until the extension is granted — record the grant (and any LD clause) when the letter arrives.</p>
+    <div class="row"><div class="grow"><label>Applied on</label><input id="x-app" type="date" value="${today()}"></div>
+      <div class="grow"><label>DP asked for</label><input id="x-dp" type="date"></div></div>
+    <label>Remarks (letter ref, reason…)</label><textarea id="x-rem" rows="2"></textarea>
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="x-ok">Log application</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#x-ok').onclick = async ()=>{
+    if(!$('#x-dp').value) return toast('Enter the DP you are asking for');
+    await rpc('dp_extend', { p_po_id:poId, p_line_id:lineId, p_applied:$('#x-app').value||null,
+      p_granted:null, p_revised:$('#x-dp').value, p_remarks:$('#x-rem').value||null });
+    toast('Application logged — DP unchanged until granted');
+    $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+// Record the grant. This is where LD terms are captured and the DP finally moves.
+function grantExt(extId, askedLabel, askedIso){
+  $('#dlg').innerHTML = `<div class="t-title">Record extension grant</div>
+    <p class="muted" style="margin-top:3px">You asked for <b>${esc(askedLabel)}</b>. Enter what was actually granted. Granting moves the working DP.</p>
+    <div class="row"><div class="grow"><label>Granted on</label><input id="g-on" type="date" value="${today()}"></div>
+      <div class="grow"><label>Revised DP granted</label><input id="g-dp" type="date" value="${esc(askedIso||'')}"></div></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
+      <input id="g-ld" type="checkbox" style="width:auto" onchange="document.getElementById('ld-wrap').style.display=this.checked?'block':'none'">
+      Granted <b>with LD</b> (liquidated damages)</label>
+    <div id="ld-wrap" style="display:none;border-left:3px solid #e5484d;padding-left:10px;margin-top:8px">
+      <div class="row"><div class="grow"><label>LD rate (% per week)</label><input id="g-rate" type="number" step="0.01" placeholder="e.g. 0.5"></div>
+        <div class="grow"><label>Cap (% max)</label><input id="g-cap" type="number" step="0.01" placeholder="e.g. 10"></div></div>
+      <label>Clause reference</label><input id="g-cl" placeholder="e.g. IRS Conditions of Contract, cl. 0702">
+      <p class="muted" style="margin:6px 0 0">Exposure accrues from the <b>original</b> DP on the undelivered balance, capped.</p>
+    </div>
+    <label>Remarks (letter ref…)</label><textarea id="g-rem" rows="2"></textarea>
+    <div class="row" style="margin-top:12px"><button class="a dark grow" id="g-ok">Record grant</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#g-ok').onclick = async ()=>{
+    const ld = $('#g-ld').checked;
+    if(!$('#g-dp').value) return toast('Enter the revised DP that was granted');
+    if(ld && (!$('#g-rate').value || !$('#g-cap').value)) return toast('LD needs both a rate and a cap');
+    await rpc('dp_extension_grant', { p_ext_id:extId, p_granted:$('#g-on').value, p_revised:$('#g-dp').value,
+      p_ld_applicable:ld, p_ld_rate:ld?Number($('#g-rate').value):null, p_ld_cap:ld?Number($('#g-cap').value):null,
+      p_ld_clause:ld?($('#g-cl').value||null):null, p_remarks:$('#g-rem').value||null });
+    toast(ld ? 'Granted with LD — DP moved, exposure now tracked' : 'Granted clean — DP moved');
+    $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+function invoiceSet(lineId){
+  $('#dlg').innerHTML = `<div class="t-title">Invoice / receipt status</div>
+    <p class="muted" style="margin-top:3px">This lags the dispatch — a line can be fully dispatched and still unpaid.</p>
+    <select id="i-st"><option value="PENDING">Pending</option><option value="INVOICED">Invoiced</option>
+      <option value="RECEIVED">Payment received</option></select>
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="i-ok">Save</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#i-ok').onclick = async ()=>{
+    await rpc('line_invoice_set', { p_line_id:lineId, p_status:$('#i-st').value });
+    toast('Saved'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+// Tag the quotation this PO was won against. Without this, no honest win rate exists.
+async function linkQtn(poId, current){
+  const qs = await q('v_quotations', x=>x.order('qtn_date',{ascending:false}));
+  $('#dlg').innerHTML = `<div class="t-title">Which quotation won this order?</div>
+    <p class="muted" style="margin-top:3px">This is the link the Sales funnel needs. Leave blank if the order came in without a quotation from us.</p>
+    <label>Quotation</label>
+    <select id="lq"><option value="">— none / not known —</option>
+      ${qs.map(x=>`<option value="${esc(x.qtn_no)}" ${x.qtn_no===current?'selected':''}>${esc(x.qtn_no)} · ${esc((x.customer||'').slice(0,32))} · ${fmt(x.qtn_date)}</option>`).join('')}
+    </select>
+    <div class="row" style="margin-top:12px"><button class="a gold grow" id="lq-ok">Save</button>
+      <button class="a" onclick="dlg.close()">Cancel</button></div>`;
+  $('#lq-ok').onclick = async ()=>{
+    await rpc('po_link_quotation', { p_po_id:poId, p_qtn_no:$('#lq').value || null });
+    toast('Linked'); $('#dlg').close(); render[TAB]();
+  };
+  $('#dlg').showModal();
+}
+async function cancelPO(id){
+  const why = prompt('Move this PO to Cancelled / Arbitration.\nReason (e.g. "Cancelled by railway", "Under arbitration"):');
+  if(!why || !why.trim()) return;
+  await rpc('po_cancel', { p_po_id:id, p_reason:why.trim() }); toast('Moved to Cancelled / Arbitration'); $('#dlg').close(); go('cxl');
+}
+async function closePO(id){
+  if(!confirm('Close this PO? Open lines stay on record; the PO leaves the pending lens.')) return;
+  await rpc('po_close', { p_po_id:id }); toast('PO closed'); $('#dlg').close(); go('reg');
+}
+
+// ---- boot ----
+(async ()=>{
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ location.href = './index.html'; return; }
+  const {data,error} = await sb.rpc('my_profile');
+  if(error || !data?.length){ location.href = './index.html'; return; }
+  ME = data[0];
+  $('#who').textContent = ME.full_name.split(' ')[0] + ' · ' + ME.role;
+  drawNav(); render.pending();
+})();
+</script>
+<script>
+/* KSK access-aware sidebar: rebuild the module menu from my_modules() so that
+   module names, order and per-person visibility all follow the database grid.
+   Fails safe: on any error the existing static menu is left untouched. */
+(function(){
+  var HREF={sales:'sales.html',orders:'orders.html',production:'production.html',kartavya:'kartavya.html',ddr:'ddr.html',masters:'masters.html'};
+  var ICON={sales:'₹',orders:'▦',production:'⚙',kartavya:'✓',ddr:'▤',masters:'☰'};
+  async function render(){
+    var nav=document.querySelector('.ksk-sb .nv'); if(!nav) return;
+    var mods; try{ var r=await sb.rpc('my_modules'); mods=r&&r.data; }catch(e){ return; }
+    if(!mods) return;
+    var here=(location.pathname.split('/').pop()||'index.html');
+    var h='<a class="nv-a'+(here==='index.html'?' on':'')+'" href="./index.html"><span class="ic">▤</span><span>Dashboard</span></a>';
+    mods.forEach(function(m){ var href=HREF[m.key]||(m.key+'.html'); h+='<a class="nv-a'+(href===here?' on':'')+'" href="./'+href+'"><span class="ic">'+(ICON[m.key]||'▤')+'</span><span>'+m.label+'</span></a>'; });
+    nav.innerHTML=h;
+  }
+  function boot(){ if(typeof sb==='undefined'){ setTimeout(boot,300); return; } try{ sb.auth.onAuthStateChange(function(_e,s){ if(s) render(); }); }catch(e){} render(); }
+  boot();
+})();
+</script>
+</body>
+</html>
