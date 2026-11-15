@@ -32,7 +32,7 @@
   .t-sub { font-size:12px; color:#778; margin-top:2px; line-height:1.45; }
   .tag { font-size:10.5px; font-weight:700; border-radius:6px; padding:3px 7px; white-space:nowrap; }
   .tag.late { background:#fdeaea; color:var(--bad); } .tag.ok { background:#e6f4ea; color:var(--ok); }
-  .tag.soon { background:#fff3d6; color:var(--warn); } .tag.info { background:#e2ecff; color:#1c4fa0; }
+  .tag.soon { background:#fff3d6; color:var(--warn); } .tag.cxl { background:#3a1f1f; color:#ffd9d9; } .tag.info { background:#e2ecff; color:#1c4fa0; }
   .tag.GOVT { background:#e2ecff; color:#1c4fa0; } .tag.PVT { background:#efe7f7; color:#5b3a86; }
   .tag.closed { background:#fff4e5; color:#8a5a00; border:1px solid #ffd699; }
   button.a { border:0; border-radius:8px; padding:8px 11px; font-size:12.5px; font-weight:600; cursor:pointer; background:#e8ecf2; color:var(--navy); }
@@ -175,7 +175,7 @@ function kskTable(id,cols,rows,opts){
   return `<div class="tblwrap"><table class="dtbl" id="${id}"><thead><tr>${head}</tr></thead><tbody></tbody></table></div>`;
 }
 
-const TABS = [['pending','Pending'],['ext','Extensions'],['reg','Register'],['new','New PO'],['value','Value']];
+const TABS = [['pending','Pending'],['ext','Extensions'],['reg','Register'],['cxl','Cancelled / Arbitration'],['new','New PO'],['value','Value']];
 function drawNav(){
   const t = isAdmin() ? TABS : TABS.filter(x=>!['new','value'].includes(x[0]));
   $('#nav').innerHTML = t.map(([id,l])=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
@@ -208,7 +208,7 @@ function regDraw(){
     {label:'Lines open', num:true, sort:p=>p.pending_lines, cell:p=>`${p.pending_lines}/${p.line_count}`},
     {label:'Overdue', num:true, get:p=>p.overdue_lines, cell:p=>p.overdue_lines>0?`<span class="tag late">${p.overdue_lines}</span>`:'—'},
     {label:'Type', get:p=>p.po_type, cell:p=>`<span class="tag ${p.po_type}">${p.po_type}</span>${derived(p)?' <span class="tag" style="background:#fff4e5;color:#8a5a00">SALES</span>':''}`},
-    {label:'Status', get:p=>p.status, cell:p=>p.status!=='OPEN'?`<span class="tag info">${esc(p.status)}</span>`:'<span class="tag ok">OPEN</span>'}
+    {label:'Status', get:p=>p.status, cell:p=>p.status==='CANCELLED'?'<span class="tag cxl">CANCELLED / ARB.</span>':p.status!=='OPEN'?`<span class="tag info">${esc(p.status)}</span>`:'<span class="tag ok">OPEN</span>'}
   ];
   $('#reglist').innerHTML =
     `<p class="muted" style="margin:8px 4px">Showing ${list.length} of ${REG.length} POs · click a column to sort</p>` +
@@ -242,7 +242,7 @@ function poCard(p){
       ${derived(p)
         ? `<span class="tag" style="background:#fff4e5;color:#8a5a00">FY26-27 SALES RECORD — qty from dispatches, not a PO</span>`
         : (worst?`<span class="tag late">${p.overdue_lines} line${p.overdue_lines>1?'s':''} past DP</span>`:dpTag(p.dp_current, p.pending_lines==0))}
-      ${p.status!=='OPEN'?`<span class="tag info">${p.status}</span>`:''}
+      ${p.status==='CANCELLED'?'<span class="tag cxl">CANCELLED / ARBITRATION</span>':p.status!=='OPEN'?`<span class="tag info">${p.status}</span>`:''}
     </div></div>`;
 }
 function lineRow(l, admin){
@@ -409,6 +409,43 @@ const render = {
       <h2>Granted</h2>${grantBlock}
       ${isAdmin()?`<p class="muted" style="margin:10px 4px">LD exposure is an estimate: value of the undelivered balance × rate per week from the <b>original</b> DP, capped. Money is visible to Director &amp; Admin only — enforced in the database.</p>`:''}`;
   },
+  async cxl(){
+    const pos = await q('v_pos', x=>x.eq('status','CANCELLED').order('po_no'));
+    const ids = pos.map(p=>p.id);
+    const [lines, mon] = ids.length ? await Promise.all([
+      q('v_po_lines', x=>x.in('po_id', ids)),
+      isAdmin() ? q('v_po_money', x=>x.in('po_id', ids)) : Promise.resolve([])
+    ]) : [[],[]];
+    const rate = Object.fromEntries(mon.map(m=>[m.line_id, Number(m.rate)]));
+    const agg = p => {
+      const ls = lines.filter(l=>l.po_id===p.id);
+      return { n:ls.length,
+        ordered: ls.reduce((s,l)=>s+Number(l.qty_ordered||0),0),
+        disp: ls.reduce((s,l)=>s+Number(l.qty_dispatched||0),0),
+        bal: ls.reduce((s,l)=>s+Math.max(0,Number(l.balance||0)),0),
+        val: ls.reduce((s,l)=>s+Math.max(0,Number(l.balance||0))*(rate[l.id]||0),0),
+        uom: ls[0]?.uom||'' };
+    };
+    const rows = pos.map(p=>({...p, _a:agg(p)}));
+    const lastNote = p => { const m=(p.remarks||'').split(' | ').filter(x=>/cancel|arbitrat|status/i.test(x)); return m.length?m[m.length-1]:''; };
+    const cols=[
+      {label:'Customer', cls:()=>'wrap', get:p=>p.customer,
+        cell:p=>`<b>${esc(p.customer)}</b><span class="s2">${esc(p.po_no)} · ext ${esc(p.external_po_no||'—')}</span>`},
+      {label:'PO date', sort:p=>p.external_po_date||'', cell:p=>fmt(p.external_po_date)},
+      {label:'Ordered', num:true, get:p=>p._a.ordered, cell:p=>`${num(p._a.ordered)} ${esc(p._a.uom)}`},
+      {label:'Supplied', num:true, get:p=>p._a.disp, cell:p=>num(p._a.disp)},
+      {label:'Unsupplied', num:true, get:p=>p._a.bal, cell:p=>`<b>${num(p._a.bal)}</b>`}
+    ].concat(isAdmin()?[{label:'Unsupplied value', num:true, get:p=>p._a.val, cell:p=>money(p._a.val)}]:[]).concat([
+      {label:'Note', cls:()=>'wrap', get:p=>lastNote(p), cell:p=>`<span class="s2" style="white-space:normal">${esc(lastNote(p))}</span>`},
+      {label:'Type', get:p=>p.po_type, cell:p=>`<span class="tag ${p.po_type}">${p.po_type}</span>`}
+    ]);
+    $('#main').innerHTML = `<div class="kpi">
+        <div class="alert"><b>${rows.length}</b><span>orders cancelled / in arbitration</span></div>
+        ${isAdmin()?`<div><b style="font-size:15px">${money(rows.reduce((s,p)=>s+p._a.val,0))}</b><span>unsupplied value</span></div>`:''}
+      </div>
+      <p class="muted" style="margin:2px 4px 10px">These orders are kept off the Pending, overdue and LD lenses. Their lines are closed with the reason recorded; the unsupplied quantity stays visible here for any claim or arbitration.</p>
+      ${rows.length ? kskTable('t-cxl', cols, rows, {onRow:p=>`openPO('${p.id}')`, sortCol:0, sortDir:1}) : '<p class="muted">Nothing here.</p>'}`;
+  },
   async reg(){
     REG = await q('v_pos', x=>x.order('created_at',{ascending:false}));
     $('#main').innerHTML = `
@@ -503,7 +540,8 @@ async function openPO(id){
     ${admin?`<div class="row" style="margin-top:10px">
       <button class="a" onclick="addLine('${p.id}')">+ Line</button>
       <button class="a" onclick="extendDP('${p.id}',null,'whole PO')">⟳ DP extension (whole PO)</button>
-      ${p.status==='OPEN'?`<button class="a" onclick="closePO('${p.id}')">Close PO</button>`:''}
+      ${p.status==='OPEN'?`<button class="a" onclick="closePO('${p.id}')">Close PO</button>
+      <button class="a" style="border-color:#b33;color:#b33" onclick="cancelPO('${p.id}')">Cancel / Arbitration</button>`:''}
     </div>`:''}
     <h2>Lines (${lines.length})</h2>
     ${lines.map(l=>lineRow(l, admin)).join('') || '<p class="muted">No lines yet.</p>'}
@@ -641,6 +679,11 @@ async function linkQtn(poId, current){
     toast('Linked'); $('#dlg').close(); render[TAB]();
   };
   $('#dlg').showModal();
+}
+async function cancelPO(id){
+  const why = prompt('Move this PO to Cancelled / Arbitration.\nReason (e.g. "Cancelled by railway", "Under arbitration"):');
+  if(!why || !why.trim()) return;
+  await rpc('po_cancel', { p_po_id:id, p_reason:why.trim() }); toast('Moved to Cancelled / Arbitration'); $('#dlg').close(); go('cxl');
 }
 async function closePO(id){
   if(!confirm('Close this PO? Open lines stay on record; the PO leaves the pending lens.')) return;
