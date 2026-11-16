@@ -106,8 +106,8 @@
 const sb = supabase.createClient("https://xpacvqbmpvcwhcimieaq.supabase.co",
 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwYWN2cWJtcHZjd2hjaW1pZWFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NTczNzEsImV4cCI6MjA5OTMzMzM3MX0.88Q1E70WK8kO6osdre4a9yHmTPdAuRYau_ihxD5fl0c"); // public by design; RLS is the guard
 
-let ME=null, USERS=[], TAB='mytasks', CHK_FILTER='', ASSIGN_ROWS=0;
-let OV_TASKS=[], PEND={}, CHARTS=[], MY_CLS=[], MY_FREQ='', BADGE={pending:0,mytasks:0,checklists:0};
+let ME=null, IS_SUP=false, USERS=[], TAB='mytasks', CHK_FILTER='', ASSIGN_ROWS=0;
+let OV_TASKS=[], PEND={}, CHARTS=[], MY_CLS=[], MY_FREQ='', BADGE={pending:0,mytasks:0,checklists:0,review:0};
 let OV_FROM='2026-04-01', OV_TO=null;   // Task Overview date range; OV_TO defaults to today
 const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
   'ea@kskenggind.com':'916290154899',
@@ -159,7 +159,9 @@ const NAV=[
   {id:'pending',   label:'Task Reminder',   icon:'⚠️', admin:true},
   {id:'progress',  label:'Performance',     icon:'🎯', admin:true},
   {id:'checklists',label:'Checklists',      icon:'✅', admin:false},
+  {id:'review',    label:'Review Checklists',icon:'📷', sup:true},
 ];
+const canSee=n=>(!n.admin||isAdmin())&&(!n.sup||isAdmin()||IS_SUP);
 function drawShell(){
   $('#app').innerHTML=`
    <aside class="sidebar">
@@ -182,14 +184,14 @@ function drawShell(){
   drawNav();
 }
 function drawNav(){
-  const items=NAV.filter(n=>!n.admin||isAdmin());
+  const items=NAV.filter(canSee);
   $('#nav').innerHTML=items.map(n=>{
-    const b = n.id==='pending'?BADGE.pending : n.id==='mytasks'?BADGE.mytasks : n.id==='checklists'?BADGE.checklists : 0;
+    const b = n.id==='pending'?BADGE.pending : n.id==='mytasks'?BADGE.mytasks : n.id==='checklists'?BADGE.checklists : n.id==='review'?BADGE.review : 0;
     const badge = b? `<span class="badge ${n.id==='pending'?'red':''}">${b}</span>` : '';
     return `<div class="navitem ${TAB===n.id?'on':''}" onclick="go('${n.id}')"><span class="ic">${n.icon}</span><span class="lbl">${n.label}</span>${badge}</div>`;
   }).join('');
 }
-function go(t){ if(NAV.find(n=>n.id===t&&n.admin)&&!isAdmin()) t='mytasks';
+function go(t){ const n0=NAV.find(n=>n.id===t); if(n0&&!canSee(n0)) t='mytasks';
   TAB=t; drawNav(); (render[t]||render['mytasks'])(); }
 
 function topbar(title,sub,right){
@@ -433,9 +435,14 @@ const render={
     const overdue  = ms.filter(m=>m.status==='overdue' || (m.status==='pending' && m.due_date<t));
     const openTasks= ts;
 
-    const row=(m,extra)=>`<tr><td>${esc(m.title)}</td><td>${FREQ[m.frequency]||m.frequency}</td>
+    const row=(m,extra)=>`<tr><td>${esc(m.title)}${m.review_status==='rejected'
+        ?`<br><span class="pill late">rejected</span> <span style="color:var(--bad);font-size:12px">${esc(m.review_note||'')} — upload again</span>`:''}</td><td>${FREQ[m.frequency]||m.frequency}</td>
       <td>${fmt(m.due_date)}${extra||''}</td>
-      <td><button class="btn green" onclick="doMark('${m.id}')">✓ Done</button></td></tr>`;
+      <td>${m.kind==='photo'
+          ? `<button class="btn green" onclick="photoDlg('${m.id}')">📷 Upload photo</button>`
+          : m.kind==='review'
+          ? `<button class="btn green" onclick="go('review')">📷 Review team</button> <button class="btn" onclick="doMark('${m.id}')">✓ Done</button>`
+          : `<button class="btn green" onclick="doMark('${m.id}')">✓ Done</button>`}</td></tr>`;
     // rows arrives as an array; interpolating one directly joins it with commas
     const MISS_SHOWN=20;
     const tbl=(rows,head)=>`<table><thead><tr><th>Duty</th><th>Frequency</th><th>${head}</th><th>Action</th></tr></thead><tbody>${Array.isArray(rows)?rows.join(''):rows}</tbody></table>`;
@@ -495,8 +502,10 @@ const render={
         ${missed.length?tbl(missed.slice(0,MISS_SHOWN).map(m=>row(m,' <span class="pill late">missed</span>')),'Was due')
             +(missed.length>MISS_SHOWN?`<p style="color:var(--muted);font-size:12px;margin-top:8px">Showing the most recent ${MISS_SHOWN} of ${missed.length}.</p>`:'')
           :'<p style="color:var(--muted)">Nothing missed ✓</p>'}
-      </div>`);
+      </div>
+      <div id="my-photos"></div>`);
     dutyRender();
+    myPhotosPanel();
   },
   async progress(){ await summaryScreen(); },
   async checklists(){
@@ -737,12 +746,123 @@ async function ckCreate(){
                                 p_on_miss:$('#ck-miss').value,p_start:start});
   await rpc('kart_sweep_now',{}).catch(()=>{}); toast('Created'); closeDlg(); CHK_FILTER=''; render.checklists(); }
 function setChkFilter(v){ CHK_FILTER=v; render.checklists(); }
+
+// ---- Paper checklist photos (10-Nov-2026) ------------------------------------
+// Staff fill their checklist on paper and photograph it. Photo duties (kind='photo')
+// can ONLY be completed by uploading: checklist_submit() stores the photo(s) and marks
+// the occurrence done, or done_late if after the cutoff (9 PM IST). Several photos per
+// upload are allowed for multi-page sheets. Photos sit in the private Storage bucket
+// 'checklist-photos' under <email>/, and are copied to Drive by the mirror script.
+// The supervisor accepts/rejects on Review Checklists; a reject re-opens the occurrence.
+const BUCKET='checklist-photos';
+let PHOTO_FILES=[];
+function photoDlg(markId){
+  PHOTO_FILES=[];
+  dlg(`<h3 style="margin:0 0 6px">Upload checklist photo</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px">Photograph the whole sheet, flat and readable. Add more photos if it has more than one page.</p>
+    <label class="btn green" style="display:inline-block">📷 Take / choose photo
+      <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="photoPick(this.files)"></label>
+    <div id="ph-prev" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn ghost" onclick="closeDlg()">Cancel</button>
+      <button class="btn green" id="ph-go" disabled onclick="photoSend('${markId}')">Submit</button></div>`);
+}
+function photoPick(files){
+  for(const f of files) PHOTO_FILES.push(f);
+  $('#ph-prev').innerHTML=PHOTO_FILES.map((f,i)=>`<img src="${URL.createObjectURL(f)}" style="width:90px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`).join('');
+  $('#ph-go').disabled=!PHOTO_FILES.length;
+}
+// shrink to ~1800px long edge, JPEG — phone photos are 4-8 MB, this is ~400 KB and still legible
+async function shrink(file){
+  try{
+    const img=await createImageBitmap(file);
+    const k=Math.min(1,1800/Math.max(img.width,img.height));
+    const c=document.createElement('canvas'); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    return await new Promise(r=>c.toBlob(b=>r(b||file),'image/jpeg',0.82));
+  }catch(e){ return file; }   // e.g. HEIC the browser can't decode: send as is
+}
+async function photoSend(markId){
+  const btn=$('#ph-go'); btn.disabled=true; btn.textContent='Uploading…';
+  try{
+    const m=(await q('v_checklist_marks',x=>x.eq('id',markId)))[0]||{};
+    const stamp=new Date().toISOString().replace(/[-:T]/g,'').slice(0,14);
+    const paths=[];
+    for(let i=0;i<PHOTO_FILES.length;i++){
+      const blob=await shrink(PHOTO_FILES[i]);
+      const ext=blob.type==='image/jpeg'?'jpg':(PHOTO_FILES[i].name.split('.').pop()||'jpg').toLowerCase();
+      const path=`${ME.email}/${m.due_date||today()}_${FREQ[m.frequency]||'Checklist'}_${stamp}_${i+1}.${ext}`;
+      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:blob.type||'image/jpeg',upsert:false});
+      if(error) throw error;
+      paths.push(path);
+    }
+    const st=await rpc('checklist_submit',{p_mark_id:markId,p_paths:paths});
+    closeDlg(); toast(st==='done'?'Uploaded ✓ — on time':'Uploaded ✓ — recorded as late');
+    await refreshBadges(); render[TAB]();
+  }catch(e){ toast(e.message||'Upload failed'); btn.disabled=false; btn.textContent='Submit'; }
+}
+async function signed(paths){
+  if(!paths.length) return {};
+  const {data}=await sb.storage.from(BUCKET).createSignedUrls(paths,3600);
+  const o={}; (data||[]).forEach(d=>{ if(d.signedUrl) o[d.path]=d.signedUrl; }); return o;
+}
+const thumb=(u)=>u?`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" style="width:72px;height:96px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"></a>`:'';
+function reviewPill(r){ return r==='accepted'?'<span class="pill ok">accepted</span>':r==='rejected'?'<span class="pill late">rejected</span>':r==='pending'?'<span class="pill warn">awaiting review</span>':''; }
+async function myPhotosPanel(){
+  const ms=await q('v_checklist_marks',x=>x.eq('assignee_email',ME.email).eq('kind','photo')
+                    .not('review_status','is',null).order('due_date',{ascending:false}).limit(14));
+  const host=$('#my-photos'); if(!host||!ms.length) return;
+  const {data:pr}=await sb.rpc('checklist_my_proofs',{p_mark_ids:ms.map(m=>m.id)});
+  const U=await signed((pr||[]).map(p=>p.path));
+  host.innerHTML=`<div class="panel"><div class="ph"><h2>My checklist photos</h2>
+    <span style="color:var(--muted);font-size:12px">Last 14 uploads and what your supervisor said</span></div>
+    <table><thead><tr><th>Checklist</th><th>For</th><th>Status</th><th>Review</th><th>Photo</th></tr></thead><tbody>
+    ${ms.map(m=>`<tr><td>${esc(FREQ[m.frequency])}</td><td>${fmt(m.due_date)}</td><td>${markPill(m)}</td>
+      <td>${reviewPill(m.review_status)}${m.review_note?`<br><span style="font-size:12px;color:var(--muted)">${esc(m.review_note)}</span>`:''}</td>
+      <td>${(pr||[]).filter(p=>p.mark_id===m.id).map(p=>thumb(U[p.path])).join(' ')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+let REV_TAB='pending';
+render.review = async function(){
+  view(`${topbar('Review Checklists','Accept or reject your team\'s checklist photos — due every Tuesday by 12 PM',
+        `<button class="btn ghost" onclick="go('review')">⟳ Refresh</button>`)}
+        <div class="panel"><p style="color:var(--muted)">Loading…</p></div>`);
+  const {data,error}=await sb.rpc('checklist_review_queue',{p_status:REV_TAB});
+  if(error) return toast(error.message);
+  const rows=data||[];
+  const U=await signed(rows.flatMap(r=>r.paths||[]));
+  const tabs=['pending','accepted','rejected'].map(s=>`<button class="btn ${REV_TAB===s?'green':'ghost'}" onclick="REV_TAB='${s}';go('review')">${s==='pending'?'Waiting':s[0].toUpperCase()+s.slice(1)}</button>`).join(' ');
+  view(`${topbar('Review Checklists','Accept or reject your team\'s checklist photos — due every Tuesday by 12 PM',
+        `<button class="btn ghost" onclick="go('review')">⟳ Refresh</button>`)}
+    <div class="panel"><div class="ph"><h2>${REV_TAB==='pending'?'Waiting for you':REV_TAB==='accepted'?'Accepted':'Rejected'} (${rows.length})</h2><div>${tabs}</div></div>
+    ${rows.length?`<table><thead><tr><th>Person</th><th>Checklist</th><th>For</th><th>Uploaded</th><th>Photo</th><th>${REV_TAB==='pending'?'Action':'Note'}</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${esc(r.assignee_name)}${isAdmin()&&r.supervisor_name?`<br><span style="font-size:11px;color:var(--muted)">sup: ${esc(r.supervisor_name)}</span>`:''}</td>
+        <td>${esc(FREQ[r.frequency])}</td><td>${fmt(r.due_date)}</td>
+        <td>${r.done_at?new Date(r.done_at).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'} ${r.status==='done_late'?'<span class="pill late">late</span>':''}</td>
+        <td>${(r.paths||[]).map(p=>thumb(U[p])).join(' ')}</td>
+        <td>${REV_TAB==='pending'
+          ?`<button class="btn green" onclick="revDo('${r.mark_id}',true)">✓ Accept</button> <button class="btn" onclick="revReject('${r.mark_id}')">✗ Reject</button>`
+          :esc(r.review_note||'')}</td></tr>`).join('')}
+      </tbody></table>`
+      :`<p style="color:var(--muted)">${REV_TAB==='pending'?'Nothing waiting ✓':'None.'}</p>`}</div>`);
+};
+async function revDo(id,ok,note){ await rpc('checklist_review',{p_mark_id:id,p_accept:ok,p_note:note||null});
+  toast(ok?'Accepted ✓':'Rejected — sent back'); closeDlg(); await refreshBadges(); drawNav(); render.review(); }
+function revReject(id){
+  dlg(`<h3 style="margin:0 0 8px">Reject this checklist</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 8px">Say what is wrong. The person sees this and must upload again.</p>
+    <textarea id="rv-note" class="inp" rows="3" style="width:100%" placeholder="e.g. Items 4–6 not filled, photo unreadable"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+      <button class="btn ghost" onclick="closeDlg()">Cancel</button>
+      <button class="btn green" onclick="revDo('${id}',false,$('#rv-note').value)">Reject</button></div>`);
+}
 async function refreshBadges(){
   const ts=await q('v_tasks', x=>x.eq('status','OPEN'));
   BADGE.pending=ts.length;
   BADGE.mytasks=ts.filter(t=>t.assignee_email===ME.email).length;
   const ms=await q('v_checklist_marks', x=>x.in('status',['pending','overdue']).lte('due_date',today()));
   BADGE.checklists=ms.filter(m=>m.assignee_email===ME.email).length;
+  if(isAdmin()||IS_SUP){ const r=await sb.rpc('checklist_review_queue',{p_status:'pending'}); BADGE.review=(r.data||[]).length; }
 }
 
 // ---- boot ----
@@ -753,6 +873,7 @@ async function refreshBadges(){
   if(error||!data?.length){ location.href='./index.html'; return; }
   ME=data[0];
   USERS=await q('v_users', x=>x.order('full_name'));
+  IS_SUP=!!(await sb.rpc('checklist_am_supervisor')).data;
   document.title = possessive(ME.full_name)+' Task List · KSK ERP';
   await refreshBadges();
   drawShell(); go('mytasks');   // everyone lands on their own list, admins included
