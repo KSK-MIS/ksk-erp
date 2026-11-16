@@ -70,6 +70,11 @@
   td{padding:11px 8px;border-bottom:1px solid #f1f5f3;vertical-align:middle;}
   tr.grp td{background:var(--head);font-weight:800;font-size:12px;color:var(--sb);letter-spacing:.5px;}
   .idbadge{display:inline-block;min-width:26px;text-align:center;background:#eef2f0;border-radius:6px;padding:2px 6px;font-size:11.5px;color:#5a6f68;}
+  .phcards{display:flex;flex-direction:column;gap:10px}
+  .phcard{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff}
+  .phimgs{display:flex;gap:6px;flex-wrap:wrap;flex:0 0 auto;max-width:45%}
+  .phimgs img{width:84px;height:112px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+  .phinfo{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:14px}
   .pill{font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;}
   .pill.ok{background:#e6f6ee;color:#0e7a4e;}.pill.late{background:#fdecec;color:#c0322f;}.pill.open{background:#eaf1fd;color:#2b5cb8;}.pill.warn{background:#fef3e2;color:#a5670a;}.pill.mut{background:#eef2f0;color:#6b7f78;}
   .inp{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#fff;margin-top:4px;}
@@ -118,7 +123,17 @@ const PHONES = { // email -> intl number (digits only) for WhatsApp reminders
   'pkbehera@kskenggind.com':'919338123830',
   'rrampuria@kskenggind.com':'919989022011',
   'rsingh@kskenggind.com':'918962747160',
-  'vagarwal@kskenggind.com':'919830058119'
+  'vagarwal@kskenggind.com':'919830058119',
+  // added 16-Nov-2026 with the paper-checklist roll-out
+  'skbharti@kskenggind.com':'918517988446',
+  'idewangan@kskenggind.com':'918519022123',
+  'mverma@kskenggind.com':'919981183278',
+  'srani@kskenggind.com':'919827187685',
+  'dyadav@kskenggind.com':'918269134359',
+  'asharma@kskenggind.com':'918319550392',
+  'rmrao@kskenggind.com':'918839389143',
+  'skumar@kskenggind.com':'919131277899',
+  'smishra@kskenggind.com':'917415797268'
 };
 const FREQ={D:'Daily',W:'Weekly',M:'Monthly',Q:'Quarterly',H:'Half-yearly',Y:'Yearly'};
 
@@ -806,7 +821,7 @@ async function signed(paths){
   const {data}=await sb.storage.from(BUCKET).createSignedUrls(paths,3600);
   const o={}; (data||[]).forEach(d=>{ if(d.signedUrl) o[d.path]=d.signedUrl; }); return o;
 }
-const thumb=(u)=>u?`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" style="width:72px;height:96px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"></a>`:'';
+const thumb=(u)=>u?`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="checklist photo"></a>`:'';
 function reviewPill(r){ return r==='accepted'?'<span class="pill ok">accepted</span>':r==='rejected'?'<span class="pill late">rejected</span>':r==='pending'?'<span class="pill warn">awaiting review</span>':''; }
 async function myPhotosPanel(){
   const ms=await q('v_checklist_marks',x=>x.eq('assignee_email',ME.email).eq('kind','photo')
@@ -816,11 +831,11 @@ async function myPhotosPanel(){
   const U=await signed((pr||[]).map(p=>p.path));
   host.innerHTML=`<div class="panel"><div class="ph"><h2>My checklist photos</h2>
     <span style="color:var(--muted);font-size:12px">Last 14 uploads and what your supervisor said</span></div>
-    <table><thead><tr><th>Checklist</th><th>For</th><th>Status</th><th>Review</th><th>Photo</th></tr></thead><tbody>
-    ${ms.map(m=>`<tr><td>${esc(FREQ[m.frequency])}</td><td>${fmt(m.due_date)}</td><td>${markPill(m)}</td>
-      <td>${reviewPill(m.review_status)}${m.review_note?`<br><span style="font-size:12px;color:var(--muted)">${esc(m.review_note)}</span>`:''}</td>
-      <td>${(pr||[]).filter(p=>p.mark_id===m.id).map(p=>thumb(U[p.path])).join(' ')}</td></tr>`).join('')}
-    </tbody></table></div>`;
+    <div class="phcards">${ms.map(m=>`<div class="phcard">
+      <div class="phimgs">${(pr||[]).filter(p=>p.mark_id===m.id).map(p=>thumb(U[p.path])).join('')}</div>
+      <div class="phinfo"><b>${esc(FREQ[m.frequency])} · ${fmt(m.due_date)}</b>
+        <div>${markPill(m)} ${reviewPill(m.review_status)}</div>
+        ${m.review_note?`<div style="font-size:12px;color:var(--muted)">${esc(m.review_note)}</div>`:''}</div></div>`).join('')}</div></div>`;
 }
 let REV_TAB='pending';
 render.review = async function(){
@@ -835,15 +850,16 @@ render.review = async function(){
   view(`${topbar('Review Checklists','Accept or reject your team\'s checklist photos — due every Tuesday by 12 PM',
         `<button class="btn ghost" onclick="go('review')">⟳ Refresh</button>`)}
     <div class="panel"><div class="ph"><h2>${REV_TAB==='pending'?'Waiting for you':REV_TAB==='accepted'?'Accepted':'Rejected'} (${rows.length})</h2><div>${tabs}</div></div>
-    ${rows.length?`<table><thead><tr><th>Person</th><th>Checklist</th><th>For</th><th>Uploaded</th><th>Photo</th><th>${REV_TAB==='pending'?'Action':'Note'}</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td>${esc(r.assignee_name)}${isAdmin()&&r.supervisor_name?`<br><span style="font-size:11px;color:var(--muted)">sup: ${esc(r.supervisor_name)}</span>`:''}</td>
-        <td>${esc(FREQ[r.frequency])}</td><td>${fmt(r.due_date)}</td>
-        <td>${r.done_at?new Date(r.done_at).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'} ${r.status==='done_late'?'<span class="pill late">late</span>':''}</td>
-        <td>${(r.paths||[]).map(p=>thumb(U[p])).join(' ')}</td>
-        <td>${REV_TAB==='pending'
-          ?`<button class="btn green" onclick="revDo('${r.mark_id}',true)">✓ Accept</button> <button class="btn" onclick="revReject('${r.mark_id}')">✗ Reject</button>`
-          :esc(r.review_note||'')}</td></tr>`).join('')}
-      </tbody></table>`
+    ${rows.length?`<div class="phcards">${rows.map(r=>`<div class="phcard">
+        <div class="phimgs">${(r.paths||[]).map(p=>thumb(U[p])).join('')}</div>
+        <div class="phinfo"><b>${esc(r.assignee_name)}</b>
+          <div>${esc(FREQ[r.frequency])} checklist for ${fmt(r.due_date)}</div>
+          <div style="font-size:12px;color:var(--muted)">Uploaded ${r.done_at?new Date(r.done_at).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}
+            ${r.status==='done_late'?'<span class="pill late">late</span>':'<span class="pill ok">on time</span>'}</div>
+          ${REV_TAB==='pending'
+            ?`<div style="display:flex;gap:8px;margin-top:6px"><button class="btn green" onclick="revDo('${r.mark_id}',true)">✓ Accept</button><button class="btn" onclick="revReject('${r.mark_id}')">✗ Reject</button></div>`
+            :(r.review_note?`<div style="font-size:12px">${esc(r.review_note)}</div>`:'')}
+        </div></div>`).join('')}</div>`
       :`<p style="color:var(--muted)">${REV_TAB==='pending'?'Nothing waiting ✓':'None.'}</p>`}</div>`);
 };
 async function revDo(id,ok,note){ await rpc('checklist_review',{p_mark_id:id,p_accept:ok,p_note:note||null});
