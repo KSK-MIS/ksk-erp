@@ -825,10 +825,14 @@ async function photoSend(markId){
     const paths=[];
     for(let i=0;i<PHOTO_FILES.length;i++){
       const f=PHOTO_FILES[i], img=isImg(f);
-      const blob=img?await shrink(f):f;
+      // always send an explicit type: some Android pickers hand over files with an empty type,
+      // which the bucket's allowed-types list would reject
+      let blob=img?await shrink(f):f;
       const ext=img?(blob.type==='image/jpeg'?'jpg':(extOf(f.name)||'jpg')):extOf(f.name);
+      const typ=img?(blob.type||(/^hei[cf]$/.test(ext)?'image/'+ext:ext==='png'?'image/png':ext==='webp'?'image/webp':'image/jpeg')):DOC_TYPES[ext];
+      if(blob.type!==typ) blob=new Blob([blob],{type:typ});
       const path=`${ME.email}/${m.due_date||today()}_${FREQ[m.frequency]||'Checklist'}_${stamp}_${i+1}.${ext}`;
-      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:img?(blob.type||'image/jpeg'):(DOC_TYPES[ext]||f.type),upsert:false});
+      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:typ,upsert:false});
       if(error) throw error;
       paths.push(path);
     }
