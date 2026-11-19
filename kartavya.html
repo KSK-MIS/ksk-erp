@@ -74,6 +74,9 @@
   .phcard{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff}
   .phimgs{display:flex;gap:6px;flex-wrap:wrap;flex:0 0 auto;max-width:45%}
   .phimgs img{width:84px;height:112px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+  .doctile{width:84px;height:112px;border:1px solid var(--line);border-radius:8px;background:#f6f8fb;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:6px;font-size:30px;text-decoration:none;color:var(--ink,#1f2937);padding:4px;text-align:center}
+  .doctile span{font-size:11px;line-height:1.2;word-break:break-all;max-height:42px;overflow:hidden}
   .phinfo{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:14px}
   .pill{font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;}
   .pill.ok{background:#e6f6ee;color:#0e7a4e;}.pill.late{background:#fdecec;color:#c0322f;}.pill.open{background:#eaf1fd;color:#2b5cb8;}.pill.warn{background:#fef3e2;color:#a5670a;}.pill.mut{background:#eef2f0;color:#6b7f78;}
@@ -771,20 +774,37 @@ function setChkFilter(v){ CHK_FILTER=v; render.checklists(); }
 // The supervisor accepts/rejects on Review Checklists; a reject re-opens the occurrence.
 const BUCKET='checklist-photos';
 let PHOTO_FILES=[];
+// photos plus PDF / Word / Excel (bucket allows these types, 15 MB each)
+const DOC_TYPES={pdf:'application/pdf',doc:'application/msword',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+const DOC_ACCEPT='image/*,.pdf,.doc,.docx,.xls,.xlsx,'+Object.values(DOC_TYPES).join(',');
+const extOf=n=>(String(n).split('?')[0].split('.').pop()||'').toLowerCase();
+const isImg=f=>/^image\//.test(f.type)||/^(jpe?g|png|webp|heic|heif)$/.test(extOf(f.name));
+const fileIcon=e=>e==='pdf'?'📕':/^docx?$/.test(e)?'📘':/^xlsx?$/.test(e)?'📗':'📄';
 function photoDlg(markId){
   PHOTO_FILES=[];
-  dlg(`<h3 style="margin:0 0 6px">Upload checklist photo</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 12px">Photograph the whole sheet, flat and readable. Add more photos if it has more than one page.</p>
-    <label class="btn green" style="display:inline-block">📷 Take / choose photo
+  dlg(`<h3 style="margin:0 0 6px">Upload checklist</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px">Photograph the whole sheet, flat and readable — or attach a PDF, Word or Excel file. You can add more than one.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <label class="btn green" style="display:inline-block">📷 Take photo
       <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="photoPick(this.files)"></label>
+    <label class="btn" style="display:inline-block">📎 Choose file
+      <input type="file" accept="${DOC_ACCEPT}" multiple style="display:none" onchange="photoPick(this.files)"></label></div>
     <div id="ph-prev" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost" onclick="closeDlg()">Cancel</button>
       <button class="btn green" id="ph-go" disabled onclick="photoSend('${markId}')">Submit</button></div>`);
 }
 function photoPick(files){
-  for(const f of files) PHOTO_FILES.push(f);
-  $('#ph-prev').innerHTML=PHOTO_FILES.map((f,i)=>`<img src="${URL.createObjectURL(f)}" style="width:90px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`).join('');
+  for(const f of files){
+    if(!isImg(f)&&!DOC_TYPES[extOf(f.name)]){ toast('Only photos, PDF, Word or Excel files'); continue; }
+    if(f.size>15*1024*1024){ toast(f.name+' is over 15 MB'); continue; }
+    PHOTO_FILES.push(f);
+  }
+  $('#ph-prev').innerHTML=PHOTO_FILES.map(f=>isImg(f)
+    ?`<img src="${URL.createObjectURL(f)}" style="width:90px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`
+    :`<div class="doctile">${fileIcon(extOf(f.name))}<span>${esc(f.name)}</span></div>`).join('');
   $('#ph-go').disabled=!PHOTO_FILES.length;
 }
 // shrink to ~1800px long edge, JPEG — phone photos are 4-8 MB, this is ~400 KB and still legible
@@ -804,10 +824,11 @@ async function photoSend(markId){
     const stamp=new Date().toISOString().replace(/[-:T]/g,'').slice(0,14);
     const paths=[];
     for(let i=0;i<PHOTO_FILES.length;i++){
-      const blob=await shrink(PHOTO_FILES[i]);
-      const ext=blob.type==='image/jpeg'?'jpg':(PHOTO_FILES[i].name.split('.').pop()||'jpg').toLowerCase();
+      const f=PHOTO_FILES[i], img=isImg(f);
+      const blob=img?await shrink(f):f;
+      const ext=img?(blob.type==='image/jpeg'?'jpg':(extOf(f.name)||'jpg')):extOf(f.name);
       const path=`${ME.email}/${m.due_date||today()}_${FREQ[m.frequency]||'Checklist'}_${stamp}_${i+1}.${ext}`;
-      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:blob.type||'image/jpeg',upsert:false});
+      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{contentType:img?(blob.type||'image/jpeg'):(DOC_TYPES[ext]||f.type),upsert:false});
       if(error) throw error;
       paths.push(path);
     }
@@ -821,7 +842,9 @@ async function signed(paths){
   const {data}=await sb.storage.from(BUCKET).createSignedUrls(paths,3600);
   const o={}; (data||[]).forEach(d=>{ if(d.signedUrl) o[d.path]=d.signedUrl; }); return o;
 }
-const thumb=(u)=>u?`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="checklist photo"></a>`:'';
+const thumb=(u)=>{ if(!u) return ''; const e=extOf(u);
+  return DOC_TYPES[e]?`<a class="doctile" href="${u}" target="_blank" rel="noopener">${fileIcon(e)}<span>${e.toUpperCase()} — open</span></a>`
+    :`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="checklist photo"></a>`; };
 function reviewPill(r){ return r==='accepted'?'<span class="pill ok">accepted</span>':r==='rejected'?'<span class="pill late">rejected</span>':r==='pending'?'<span class="pill warn">awaiting review</span>':''; }
 async function myPhotosPanel(){
   const ms=await q('v_checklist_marks',x=>x.eq('assignee_email',ME.email).eq('kind','photo')
